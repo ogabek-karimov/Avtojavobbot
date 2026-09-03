@@ -1,0 +1,22 @@
+# Fly.io konfiguratsiyasi. `app` nomini o'zingiz tanlagan (global unikal) nomga almashtiring.
+app = "avtojavobbot"
+primary_region = "fra"
+
+[build]
+
+[env]
+  DATA_DIR = "/data"
+
+# Doimiy saqlash (chat sozlamalari qayta deploy qilinganda ham saqlanib qolishi uchun).
+# Avval terminalda ishga tushiring: fly volumes create bot_data --size 1 --region fra
+[mounts]
+  source = "bot_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+# Bu bot HTTP so'rov kutmaydi (Telegram'ni polling orqali so'raydi),
+# shuning uchun http_service/services bo'limi kerak emas - jarayon doimiy fon
+# vazifasi sifatida ishlaydi.
