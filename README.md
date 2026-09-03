@@ -10,7 +10,8 @@ alohida sozlanadi.
 - `/autoreply_on`, `/autoreply_off` — shu chatda AI avto-javobni yoqish/o'chirish
 - `/setprompt <matn>` — AI qanday javob berishi kerakligini o'zingiz yozib qo'yasiz
 - `/status` — joriy holatni ko'rish
-- Barcha sozlash buyruqlari faqat `OWNER_ID` (sizning Telegram ID) uchun ishlaydi
+- Barcha sozlash buyruqlari faqat adminlar uchun ishlaydi (`ADMIN_IDS` bilan boshlang'ich admin(lar) belgilanadi)
+- `/addadmin <ID>`, `/removeadmin <ID>`, `/listadmins` — admin boshqa foydalanuvchini ham admin qila oladi (yoki olib tashlay oladi)
 - Har bir chat uchun qisqa suhbat tarixi saqlanadi (kontekstli javob berish uchun)
 
 **Eslatma:** bu bot faqat AI avto-javob beradi. U guruh/shaxsiy chatlardagi
@@ -33,8 +34,9 @@ python -m bot.main
 ```
 
 Botni Telegram'da toping, `/myid` yozing, chiqqan raqamni `.env` faylidagi
-`OWNER_ID`ga yozing va botni qayta ishga tushiring. Shundan so'ng
-`/autoreply_on` va `/setprompt` sizga ishlaydi.
+`ADMIN_IDS`ga yozing va botni qayta ishga tushiring. Shundan so'ng
+`/autoreply_on` va `/setprompt` sizga ishlaydi. Boshqa odamlarni admin qilish
+uchun `/addadmin <ularning Telegram ID>` yozing.
 
 ## Fly.io'da 24/7 ishga tushirish (bepul/arzon)
 
@@ -53,7 +55,7 @@ Botni Telegram'da toping, `/myid` yozing, chiqqan raqamni `.env` faylidagi
    o'chirilgan holat, custom prompt) standart holatga qaytadi.
 4. Maxfiy kalitlarni Fly'ga yuboring (bular hech qachon kodga yozilmaydi):
    ```bash
-   fly secrets set TELEGRAM_BOT_TOKEN=... ANTHROPIC_API_KEY=... OWNER_ID=...
+   fly secrets set TELEGRAM_BOT_TOKEN=... ANTHROPIC_API_KEY=... ADMIN_IDS=123456789
    ```
 5. Deploy qiling:
    ```bash
@@ -73,7 +75,7 @@ doimiy ishlab turgani kifoya.
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | ha | @BotFather'dan olingan token |
 | `ANTHROPIC_API_KEY` | ha | console.anthropic.com dan olingan kalit |
-| `OWNER_ID` | tavsiya etiladi | faqat shu ID sozlash buyruqlarini ishlata oladi |
+| `ADMIN_IDS` | tavsiya etiladi | boshlang'ich admin(lar), vergul bilan (masalan `123456789,123456`) |
 | `CLAUDE_MODEL` | yo'q | standart: `claude-opus-5` (eng sifatli, lekin qimmatroq — yuqori hajmda `claude-sonnet-5` yoki `claude-haiku-4-5`ga o'tish arzonroq bo'ladi) |
 | `CLAUDE_MAX_TOKENS` | yo'q | standart: `1024` |
 | `CLAUDE_EFFORT` | yo'q | standart: `low` (tezkor, arzon suhbat uchun) |

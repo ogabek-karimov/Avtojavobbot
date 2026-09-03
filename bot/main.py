@@ -26,12 +26,12 @@ logger = logging.getLogger(__name__)
 _history: dict[int, deque] = defaultdict(lambda: deque(maxlen=config.HISTORY_LIMIT))
 
 
-def owner_only(handler):
+def admin_only(handler):
     @wraps(handler)
     async def wrapped(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        if config.OWNER_ID is not None and update.effective_user.id != config.OWNER_ID:
+        if not store.is_admin(update.effective_user.id):
             await update.message.reply_text(
-                "Bu buyruq faqat bot egasi uchun. O'z ID raqamingizni bilish uchun /myid yozing."
+                "Bu buyruq faqat adminlar uchun. O'z ID raqamingizni bilish uchun /myid yozing."
             )
             return
         await handler(update, context)
@@ -48,12 +48,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
-        "/autoreply_on - shu chatda AI avto-javobni yoqish (faqat egasi)\n"
-        "/autoreply_off - shu chatda AI avto-javobni o'chirish (faqat egasi)\n"
-        "/setprompt <matn> - shu chat uchun AI ko'rsatmasini (persona) sozlash (faqat egasi)\n"
-        "/resetprompt - ko'rsatmani standart holatga qaytarish (faqat egasi)\n"
+        "/autoreply_on - shu chatda AI avto-javobni yoqish (faqat adminlar)\n"
+        "/autoreply_off - shu chatda AI avto-javobni o'chirish (faqat adminlar)\n"
+        "/setprompt <matn> - shu chat uchun AI ko'rsatmasini (persona) sozlash (faqat adminlar)\n"
+        "/resetprompt - ko'rsatmani standart holatga qaytarish (faqat adminlar)\n"
         "/status - shu chatning joriy holatini ko'rish\n"
-        "/myid - o'zingizning Telegram ID raqamingizni bilish"
+        "/myid - o'zingizning Telegram ID raqamingizni bilish\n"
+        "/addadmin <ID> - boshqa foydalanuvchini admin qilish (faqat adminlar)\n"
+        "/removeadmin <ID> - adminlikdan olib tashlash (faqat adminlar)\n"
+        "/listadmins - joriy adminlar ro'yxati (faqat adminlar)"
     )
 
 
@@ -61,19 +64,19 @@ async def myid(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(f"Sizning Telegram ID: {update.effective_user.id}")
 
 
-@owner_only
+@admin_only
 async def autoreply_on(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await store.set_autoreply(update.effective_chat.id, True)
     await update.message.reply_text("AI avto-javob shu chatda yoqildi.")
 
 
-@owner_only
+@admin_only
 async def autoreply_off(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await store.set_autoreply(update.effective_chat.id, False)
     await update.message.reply_text("AI avto-javob shu chatda o'chirildi.")
 
 
-@owner_only
+@admin_only
 async def setprompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = " ".join(context.args)
     if not text:
@@ -84,7 +87,7 @@ async def setprompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text("Shu chat uchun AI ko'rsatmasi yangilandi.")
 
 
-@owner_only
+@admin_only
 async def resetprompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await store.set_prompt(update.effective_chat.id, None)
     _history[update.effective_chat.id].clear()
@@ -96,6 +99,50 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     state = "yoqilgan" if settings.autoreply else "o'chirilgan"
     prompt = settings.prompt or config.DEFAULT_SYSTEM_PROMPT
     await update.message.reply_text(f"Avto-javob: {state}\nKo'rsatma: {prompt}")
+
+
+def _parse_user_id(args: list[str]) -> int | None:
+    if len(args) != 1:
+        return None
+    try:
+        return int(args[0])
+    except ValueError:
+        return None
+
+
+@admin_only
+async def addadmin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = _parse_user_id(context.args)
+    if user_id is None:
+        await update.message.reply_text("Foydalanish: /addadmin <Telegram ID>")
+        return
+    added = await store.add_admin(user_id)
+    if added:
+        await update.message.reply_text(f"{user_id} endi admin.")
+    else:
+        await update.message.reply_text(f"{user_id} allaqachon admin edi.")
+
+
+@admin_only
+async def removeadmin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = _parse_user_id(context.args)
+    if user_id is None:
+        await update.message.reply_text("Foydalanish: /removeadmin <Telegram ID>")
+        return
+    removed = await store.remove_admin(user_id)
+    if removed:
+        await update.message.reply_text(f"{user_id} adminlikdan olib tashlandi.")
+    else:
+        await update.message.reply_text(
+            "Bajarilmadi: bu ID admin emas, yoki oxirgi (yagona) adminni olib tashlab bo'lmaydi."
+        )
+
+
+@admin_only
+async def listadmins(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    admins = store.list_admins()
+    text = "\n".join(str(a) for a in admins) if admins else "Adminlar yo'q."
+    await update.message.reply_text(f"Adminlar:\n{text}")
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -131,6 +178,9 @@ def build_application() -> Application:
     application.add_handler(CommandHandler("setprompt", setprompt))
     application.add_handler(CommandHandler("resetprompt", resetprompt))
     application.add_handler(CommandHandler("status", status))
+    application.add_handler(CommandHandler("addadmin", addadmin))
+    application.add_handler(CommandHandler("removeadmin", removeadmin))
+    application.add_handler(CommandHandler("listadmins", listadmins))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     return application

@@ -15,9 +15,12 @@ def _get_int(name: str) -> int | None:
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
-# Only this Telegram user id may change bot settings (/autoreply_on, /setprompt, ...).
-# Use /myid in the bot to find your id, then set OWNER_ID.
-OWNER_ID = _get_int("OWNER_ID")
+# Comma-separated Telegram user ids that are admins on first run (e.g. "123456789,123456").
+# Admins can change bot settings (/autoreply_on, /setprompt, ...) and add/remove other
+# admins with /addadmin, /removeadmin. This only seeds the list on first run - after that
+# the live admin list lives in storage (data/settings.json) and survives restarts.
+_admin_ids_raw = os.environ.get("ADMIN_IDS", "")
+INITIAL_ADMIN_IDS = [int(v) for v in _admin_ids_raw.split(",") if v.strip()]
 
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-5")
 CLAUDE_MAX_TOKENS = _get_int("CLAUDE_MAX_TOKENS") or 1024
