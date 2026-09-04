@@ -34,7 +34,7 @@ import { containsRiskyContent, isRiskyViaAI } from "./safety";
 import { renderAppHtml } from "./webapp";
 
 const RISKY_CONTENT_REPLY =
-  "Bu xabar avtomatik javob berilmaydigan mavzuga tegishli bo'lishi mumkin (pul/kod so'rash, noqonuniy yoki xavfli mazmun). " +
+  "Bu xabar avtomatik javob berilmaydigan mavzuga tegishli. " +
   "Iltimos, kuting - bot egasi sizga shaxsan javob beradi.";
 
 /**
