@@ -242,13 +242,14 @@ async function authenticateApp(
   return { userId: user.id, body };
 }
 
-async function buildAppState(env: Env, chatId: number) {
-  const [settings, admins, ownerId, faq, vip, stats] = await Promise.all([
-    getChatSettings(env, chatId),
+/** Settings/FAQ/VIP are global (bot-owner-scoped) - any admin viewing the Mini App sees/edits the same shared config. */
+async function buildAppState(env: Env) {
+  const ownerId = await getOwner(env);
+  const [settings, admins, faq, vip, stats] = await Promise.all([
+    getChatSettings(env, ownerId),
     getAdmins(env),
-    getOwner(env),
-    getFaq(env, chatId),
-    getVipList(env, chatId),
+    getFaq(env, ownerId),
+    getVipList(env, ownerId),
     getStats(env),
   ]);
   return { settings, admins, ownerId, faq, vip, stats, defaultPrompt: env.DEFAULT_SYSTEM_PROMPT };
@@ -257,7 +258,7 @@ async function buildAppState(env: Env, chatId: number) {
 async function handleApiState(request: Request, env: Env): Promise<Response> {
   const auth = await authenticateApp(request, env);
   if (auth instanceof Response) return auth;
-  const state = await buildAppState(env, auth.userId);
+  const state = await buildAppState(env);
   return new Response(JSON.stringify(state), {
     headers: { "Content-Type": "application/json" },
   });
@@ -270,26 +271,27 @@ async function handleApiAction(request: Request, env: Env): Promise<Response> {
   const action = typeof body.action === "string" ? body.action : "";
   const value = typeof body.value === "string" ? body.value : "";
 
-  const settings = await getChatSettings(env, userId);
+  const ownerId = await getOwner(env);
+  const settings = await getChatSettings(env, ownerId);
 
   switch (action) {
     case "autoreply_on":
       settings.autoreply = true;
-      await setChatSettings(env, userId, settings);
+      await setChatSettings(env, ownerId, settings);
       break;
     case "autoreply_off":
       settings.autoreply = false;
-      await setChatSettings(env, userId, settings);
+      await setChatSettings(env, ownerId, settings);
       break;
     case "set_prompt":
       if (!value.trim()) return new Response("Bo'sh matn kiritilmadi.", { status: 400 });
       settings.prompt = value;
-      await setChatSettings(env, userId, settings);
+      await setChatSettings(env, ownerId, settings);
       await clearHistory(env, userId);
       break;
     case "reset_prompt":
       settings.prompt = null;
-      await setChatSettings(env, userId, settings);
+      await setChatSettings(env, ownerId, settings);
       await clearHistory(env, userId);
       break;
     case "add_admin": {
@@ -322,33 +324,33 @@ async function handleApiAction(request: Request, env: Env): Promise<Response> {
       const trigger = typeof body.trigger === "string" ? body.trigger.trim() : "";
       const reply = typeof body.reply === "string" ? body.reply.trim() : "";
       if (!trigger || !reply) return new Response("Kalit so'z va javob bo'sh bo'lmasin.", { status: 400 });
-      await addFaqEntry(env, userId, { trigger, reply });
+      await addFaqEntry(env, ownerId, { trigger, reply });
       break;
     }
     case "remove_faq": {
       const index = typeof body.index === "number" ? body.index : parseInt(value, 10);
       if (Number.isNaN(index)) return new Response("Noto'g'ri index.", { status: 400 });
-      await removeFaqEntry(env, userId, index);
+      await removeFaqEntry(env, ownerId, index);
       break;
     }
     case "add_vip": {
       const targetId = parseInt(typeof body.id === "string" ? body.id : value, 10);
       const role = typeof body.role === "string" ? body.role.trim() : "";
       if (Number.isNaN(targetId) || !role) return new Response("ID va rol bo'sh bo'lmasin.", { status: 400 });
-      await addVipEntry(env, userId, { id: targetId, role });
+      await addVipEntry(env, ownerId, { id: targetId, role });
       break;
     }
     case "remove_vip": {
       const index = typeof body.index === "number" ? body.index : parseInt(value, 10);
       if (Number.isNaN(index)) return new Response("Noto'g'ri index.", { status: 400 });
-      await removeVipEntry(env, userId, index);
+      await removeVipEntry(env, ownerId, index);
       break;
     }
     default:
       return new Response("Noma'lum amal.", { status: 400 });
   }
 
-  const state = await buildAppState(env, userId);
+  const state = await buildAppState(env);
   return new Response(JSON.stringify(state), {
     headers: { "Content-Type": "application/json" },
   });
@@ -383,13 +385,16 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
     return;
   }
 
-  const settings = await getChatSettings(env, chatId);
+  // Sozlamalar (autoreply/prompt/FAQ/VIP) doim BOT EGASI bo'yicha - bu bitta bot, bitta
+  // ochiq suhbat konfiguratsiyasi, har bir yozgan begona odamning o'z sozlamasi emas.
+  // Faqat suhbat TARIXI shaxsga xos (chatId bo'yicha) saqlanadi.
+  const ownerId = await getOwner(env);
+  const settings = await getChatSettings(env, ownerId);
   if (!settings.autoreply) return;
 
   await recordAutoReplyInteraction(env, userId);
 
-  const ownerId = await getOwner(env);
-  const vip = findVip(await getVipList(env, chatId), userId);
+  const vip = findVip(await getVipList(env, ownerId), userId);
   if (vip) {
     const ownerName = (await tg.getChatFirstName(ownerId)) ?? "Admin";
     await tg.sendMessage(chatId, vipHoldingMessage(ownerName));
@@ -409,7 +414,7 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
     return;
   }
 
-  const faq = await getFaq(env, chatId);
+  const faq = await getFaq(env, ownerId);
   const faqReply = matchFaq(faq, text);
   if (faqReply) {
     await tg.sendMessage(chatId, faqReply);
@@ -528,18 +533,19 @@ async function handleCallbackQuery(cq: TelegramCallbackQuery, env: Env): Promise
   }
 
   const action = cq.data.slice("panel:".length);
-  const settings = await getChatSettings(env, chatId);
+  const ownerId = await getOwner(env);
+  const settings = await getChatSettings(env, ownerId);
 
   switch (action) {
     case "autoreply_on":
       settings.autoreply = true;
-      await setChatSettings(env, chatId, settings);
+      await setChatSettings(env, ownerId, settings);
       await tg.answerCallbackQuery(cq.id, "Auto-javob yoqildi.");
       break;
 
     case "autoreply_off":
       settings.autoreply = false;
-      await setChatSettings(env, chatId, settings);
+      await setChatSettings(env, ownerId, settings);
       await tg.answerCallbackQuery(cq.id, "Auto-javob o'chirildi.");
       break;
 
@@ -548,7 +554,7 @@ async function handleCallbackQuery(cq: TelegramCallbackQuery, env: Env): Promise
       break;
 
     case "listadmins": {
-      const [admins, ownerId] = await Promise.all([getAdmins(env), getOwner(env)]);
+      const admins = await getAdmins(env);
       const list =
         admins.length > 0
           ? admins.map((id) => (id === ownerId ? `👑${id}` : `${id}`)).join(", ")
@@ -597,6 +603,10 @@ async function handleCommand(
   text: string,
 ): Promise<void> {
   const userId = from.id;
+  // Sozlamalar (autoreply/prompt/FAQ/VIP) bitta - bot egasi bo'yicha - istalgan admin
+  // shuni ko'radi/tahrirlaydi, chunki bu botning ochiq (hammaga) javob berish xatti-
+  // harakati, har bir admin uchun alohida emas.
+  const ownerId = await getOwner(env);
   const [rawCommand, ...args] = text.split(/\s+/);
   const command = rawCommand.split("@")[0].toLowerCase();
 
@@ -638,7 +648,7 @@ async function handleCommand(
   switch (command) {
     case "/start": {
       if ((await isAdmin(env, userId)) && from.is_premium) {
-        const settings = await getChatSettings(env, chatId);
+        const settings = await getChatSettings(env, ownerId);
         await tg.sendMessage(
           chatId,
           `Salom! Men AI (Claude) yordamida avtomatik javob beruvchi botman.\n\n${panelText(settings, env)}`,
@@ -660,7 +670,7 @@ async function handleCommand(
 
     case "/panel": {
       if (!(await requireAdmin())) return;
-      const settings = await getChatSettings(env, chatId);
+      const settings = await getChatSettings(env, ownerId);
       await tg.sendMessage(
         chatId,
         panelText(settings, env),
@@ -686,19 +696,19 @@ async function handleCommand(
 
     case "/autoreply_on": {
       if (!(await requireAdmin())) return;
-      const settings = await getChatSettings(env, chatId);
+      const settings = await getChatSettings(env, ownerId);
       settings.autoreply = true;
-      await setChatSettings(env, chatId, settings);
-      await tg.sendMessage(chatId, "AI avto-javob shu chatda yoqildi.");
+      await setChatSettings(env, ownerId, settings);
+      await tg.sendMessage(chatId, "AI avto-javob yoqildi (bot hammaga shu tarzda javob beradi).");
       return;
     }
 
     case "/autoreply_off": {
       if (!(await requireAdmin())) return;
-      const settings = await getChatSettings(env, chatId);
+      const settings = await getChatSettings(env, ownerId);
       settings.autoreply = false;
-      await setChatSettings(env, chatId, settings);
-      await tg.sendMessage(chatId, "AI avto-javob shu chatda o'chirildi.");
+      await setChatSettings(env, ownerId, settings);
+      await tg.sendMessage(chatId, "AI avto-javob o'chirildi (bot hech kimga avtomatik javob bermaydi).");
       return;
     }
 
@@ -709,26 +719,26 @@ async function handleCommand(
         await tg.sendMessage(chatId, "Foydalanish: /setprompt <AI uchun ko'rsatma matni>");
         return;
       }
-      const settings = await getChatSettings(env, chatId);
+      const settings = await getChatSettings(env, ownerId);
       settings.prompt = prompt;
-      await setChatSettings(env, chatId, settings);
+      await setChatSettings(env, ownerId, settings);
       await clearHistory(env, chatId);
-      await tg.sendMessage(chatId, "Shu chat uchun AI ko'rsatmasi yangilandi.");
+      await tg.sendMessage(chatId, "AI ko'rsatmasi yangilandi (bot hammaga shu ko'rsatma bilan javob beradi).");
       return;
     }
 
     case "/resetprompt": {
       if (!(await requireAdmin())) return;
-      const settings = await getChatSettings(env, chatId);
+      const settings = await getChatSettings(env, ownerId);
       settings.prompt = null;
-      await setChatSettings(env, chatId, settings);
+      await setChatSettings(env, ownerId, settings);
       await clearHistory(env, chatId);
       await tg.sendMessage(chatId, "AI ko'rsatmasi standart holatga qaytarildi.");
       return;
     }
 
     case "/status": {
-      const settings = await getChatSettings(env, chatId);
+      const settings = await getChatSettings(env, ownerId);
       const state = settings.autoreply ? "yoqilgan" : "o'chirilgan";
       const prompt = settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT;
       await tg.sendMessage(chatId, `Avto-javob: ${state}\nKo'rsatma: ${prompt}`);
