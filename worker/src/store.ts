@@ -16,6 +16,16 @@ function chatFaqKey(chatId: number): string {
   return `chat:${chatId}:faq`;
 }
 
+function businessConnectionKey(connectionId: string): string {
+  return `bizconn:${connectionId}`;
+}
+
+export interface BusinessConnectionInfo {
+  ownerId: number;
+  ownerFirstName: string;
+  enabled: boolean;
+}
+
 /** Reads the admin list from KV, seeding it from ADMIN_IDS on first use. */
 export async function getAdmins(env: Env): Promise<number[]> {
   const raw = await env.BOT_KV.get(ADMINS_KEY);
@@ -146,6 +156,20 @@ export async function recordAutoReplyInteraction(env: Env, userId: number): Prom
   }
   repliedUsers.add(userId);
   await putIdSet(env, STATS_REPLIED_KEY, repliedUsers);
+}
+
+export async function setBusinessConnection(
+  env: Env,
+  connectionId: string,
+  info: BusinessConnectionInfo,
+): Promise<void> {
+  await env.BOT_KV.put(businessConnectionKey(connectionId), JSON.stringify(info));
+}
+
+export async function getBusinessConnection(env: Env, connectionId: string): Promise<BusinessConnectionInfo | null> {
+  const raw = await env.BOT_KV.get(businessConnectionKey(connectionId));
+  if (!raw) return null;
+  return JSON.parse(raw) as BusinessConnectionInfo;
 }
 
 export async function getStats(env: Env): Promise<{ repliedCount: number; respondedCount: number }> {

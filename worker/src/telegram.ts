@@ -19,6 +19,7 @@ export function telegramApi(token: string) {
       text: string,
       replyToMessageId?: number,
       replyMarkup?: InlineKeyboard,
+      businessConnectionId?: string,
     ): Promise<void> {
       const res = await fetch(`${base}/sendMessage`, {
         method: "POST",
@@ -28,6 +29,7 @@ export function telegramApi(token: string) {
           text,
           reply_to_message_id: replyToMessageId,
           reply_markup: replyMarkup,
+          business_connection_id: businessConnectionId,
         }),
       });
       if (!res.ok) {
@@ -59,11 +61,11 @@ export function telegramApi(token: string) {
       });
     },
 
-    async sendChatAction(chatId: number, action: string): Promise<void> {
+    async sendChatAction(chatId: number, action: string, businessConnectionId?: string): Promise<void> {
       await fetch(`${base}/sendChatAction`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, action }),
+        body: JSON.stringify({ chat_id: chatId, action, business_connection_id: businessConnectionId }),
       });
     },
 
@@ -90,7 +92,11 @@ export function telegramApi(token: string) {
       const res = await fetch(`${base}/setWebhook`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, secret_token: secretToken, allowed_updates: ["message", "callback_query"] }),
+        body: JSON.stringify({
+          url,
+          secret_token: secretToken,
+          allowed_updates: ["message", "callback_query", "business_connection", "business_message"],
+        }),
       });
       return res.json();
     },

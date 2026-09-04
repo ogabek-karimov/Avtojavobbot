@@ -7,6 +7,7 @@ import {
   appendHistory,
   clearHistory,
   getAdmins,
+  getBusinessConnection,
   getChatSettings,
   getFaq,
   getStats,
@@ -15,15 +16,43 @@ import {
   recordAutoReplyInteraction,
   removeAdmin,
   removeFaqEntry,
+  setBusinessConnection,
   setChatSettings,
 } from "./store";
-import type { ChatSettings, Env, TelegramCallbackQuery, TelegramUpdate } from "./types";
-import { containsRiskyContent } from "./safety";
+import type {
+  ChatSettings,
+  Env,
+  TelegramBusinessConnection,
+  TelegramCallbackQuery,
+  TelegramMessage,
+  TelegramUpdate,
+} from "./types";
+import { containsRiskyContent, isRiskyViaAI } from "./safety";
 import { renderAppHtml } from "./webapp";
 
 const RISKY_CONTENT_REPLY =
   "Bu xabar avtomatik javob berilmaydigan mavzuga tegishli bo'lishi mumkin (pul/kod so'rash, noqonuniy yoki xavfli mazmun). " +
   "Iltimos, kuting - bot egasi sizga shaxsan javob beradi.";
+
+/**
+ * Prepended to every AI-generated auto-reply (regular chat and Telegram Business alike).
+ * Two jobs: (1) force transparent AI disclosure on every message, (2) hard-block a few
+ * behaviors no unsupervised autoresponder should ever perform, regardless of how the
+ * conversation is steered - agreeing to meet in person, or handing out the admin's
+ * phone number, Telegram ID, or group/channel/bot membership counts.
+ */
+function guardrailPreamble(agentLabel: string): string {
+  return (
+    `Siz odam emassiz - siz sun'iy intellekt (AI) agentisiz, ${agentLabel}. ` +
+    `Har bir javobingizni shuni qisqa eslatib boshlang (masalan: "Men AI agentiman, ...").\n\n` +
+    "Quyidagilarni HECH QACHON qilmang, hatto qat'iy so'ralsa yoki suhbat shunga undasa ham:\n" +
+    "- Uchrashuvga rozi bo'lmang yoki uni tasdiqlaydigan gap yozmang (\"keldim\", \"tayyorman\", \"u yerda ko'rishamiz\" kabi).\n" +
+    "- Telefon raqamni bermang.\n" +
+    "- Telegram ID raqamini bermang.\n" +
+    "- Nechta guruh, kanal yoki botga a'zo ekanligi haqidagi savolga javob bermang.\n" +
+    "Shu mavzularning har birida buni bera olmasligingizni ayting va foydalanuvchini bot egasi shaxsan javob berishini kutishini so'rang.\n\n"
+  );
+}
 
 const HELP_TEXT = `/panel - boshqaruv panelini ochish (tugmalar bilan, faqat adminlar)
 /stats - hisobot: nechta userga javob berdi, nechtasi javob qaytardi (faqat adminlar)
@@ -244,6 +273,16 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
     return;
   }
 
+  if (update.business_connection) {
+    await handleBusinessConnection(update.business_connection, env);
+    return;
+  }
+
+  if (update.business_message) {
+    await handleBusinessMessage(update.business_message, env);
+    return;
+  }
+
   const message = update.message;
   if (!message || !message.text || !message.from) return;
 
@@ -262,7 +301,7 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
 
   await recordAutoReplyInteraction(env, userId);
 
-  if (containsRiskyContent(text)) {
+  if (containsRiskyContent(text) || (await isRiskyViaAI(env, text))) {
     await tg.sendMessage(chatId, RISKY_CONTENT_REPLY);
     return;
   }
@@ -274,7 +313,7 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
     return;
   }
 
-  const systemPrompt = settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT;
+  const systemPrompt = guardrailPreamble("botning AI agenti") + (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
   const limit = parseInt(env.HISTORY_LIMIT, 10);
 
   const history = await appendHistory(env, chatId, { role: "user", content: text }, limit);
@@ -282,6 +321,67 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
   const reply = await getReply(env, history, systemPrompt);
   await appendHistory(env, chatId, { role: "assistant", content: reply }, limit);
   await tg.sendMessage(chatId, reply);
+}
+
+/**
+ * A user connected (or reconfigured) the bot in their Telegram Business settings.
+ * We only activate it for people already on our own admin list - anyone else who
+ * happens to add this bot as their business bot gets no auto-reply behavior.
+ */
+async function handleBusinessConnection(conn: TelegramBusinessConnection, env: Env): Promise<void> {
+  const ownerIsAdmin = await isAdmin(env, conn.user.id);
+  if (!ownerIsAdmin) return;
+
+  await setBusinessConnection(env, conn.id, {
+    ownerId: conn.user.id,
+    ownerFirstName: conn.user.first_name,
+    enabled: conn.is_enabled,
+  });
+}
+
+/**
+ * A message someone sent directly to an admin's personal Telegram account, which the
+ * admin has connected to this bot via Telegram Business. Settings/prompt/FAQ come from
+ * the connected admin's own configuration; conversation history is kept per customer.
+ */
+async function handleBusinessMessage(message: TelegramMessage, env: Env): Promise<void> {
+  const connectionId = message.business_connection_id;
+  if (!connectionId || !message.text || !message.from) return;
+
+  const conn = await getBusinessConnection(env, connectionId);
+  if (!conn || !conn.enabled) return;
+  if (message.from.id === conn.ownerId) return; // egasining o'zi yozgan xabarga javob bermaymiz
+
+  const tg = telegramApi(env.TELEGRAM_BOT_TOKEN);
+  const customerChatId = message.chat.id;
+  const text = message.text.trim();
+
+  const settings = await getChatSettings(env, conn.ownerId);
+  if (!settings.autoreply) return;
+
+  await recordAutoReplyInteraction(env, message.from.id);
+
+  if (containsRiskyContent(text) || (await isRiskyViaAI(env, text))) {
+    await tg.sendMessage(customerChatId, RISKY_CONTENT_REPLY, undefined, undefined, connectionId);
+    return;
+  }
+
+  const faq = await getFaq(env, conn.ownerId);
+  const faqReply = matchFaq(faq, text);
+  if (faqReply) {
+    await tg.sendMessage(customerChatId, faqReply, undefined, undefined, connectionId);
+    return;
+  }
+
+  const limit = parseInt(env.HISTORY_LIMIT, 10);
+  const systemPrompt =
+    guardrailPreamble(`${conn.ownerFirstName}ning AI agenti`) + (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
+
+  const history = await appendHistory(env, customerChatId, { role: "user", content: text }, limit);
+  await tg.sendChatAction(customerChatId, "typing", connectionId);
+  const reply = await getReply(env, history, systemPrompt);
+  await appendHistory(env, customerChatId, { role: "assistant", content: reply }, limit);
+  await tg.sendMessage(customerChatId, reply, undefined, undefined, connectionId);
 }
 
 async function handleCallbackQuery(cq: TelegramCallbackQuery, env: Env): Promise<void> {

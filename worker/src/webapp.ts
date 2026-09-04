@@ -142,6 +142,24 @@ export function renderAppHtml(): string {
         <button id="addAdminBtn">Qo'shish</button>
       </div>
     </div>
+
+    <div class="card">
+      <div class="label">🏢 Telegram Business'ga ulash</div>
+      <div class="hint" style="margin-top:6px">
+        Bu bot shaxsiy Telegram akkountingizga ulanib, sizga yozganlarga siz nomingizdan
+        avtomatik javob bera oladi. Telegram texnik sabablarga ko'ra bu sozlamaga
+        tashqaridan to'g'ridan-to'g'ri o'tkazib qo'yishga ruxsat bermaydi - shuning uchun
+        quyidagi qadamlarni o'zingiz, Telegram ilovasida bajarishingiz kerak:
+      </div>
+      <div style="margin-top:12px; font-size:14px; line-height:1.6">
+        <div><b>Talab:</b> Telegram Premium obunasi kerak (Business funksiyasi shu bilan keladi).</div>
+        <div style="margin-top:8px"><b>1.</b> Telegram → Sozlamalar (Settings)</div>
+        <div><b>2.</b> "Telegram Business" bo'limini oching</div>
+        <div><b>3.</b> "Chatbots" (yoki "Chat-botlar") ni tanlang</div>
+        <div><b>4.</b> Bot username kiriting: <b>@AvtojavobAibot</b> va "Add" bosing</div>
+        <div><b>5.</b> Ruxsatlarda "Reply to messages" (xabarlarga javob berish) yoqilganini tekshiring</div>
+      </div>
+    </div>
   </div>
 
 <script>

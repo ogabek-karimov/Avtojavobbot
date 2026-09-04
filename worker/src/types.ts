@@ -48,6 +48,7 @@ export interface TelegramMessage {
   from?: TelegramUser;
   chat: TelegramChat;
   text?: string;
+  business_connection_id?: string;
 }
 
 export interface TelegramCallbackQuery {
@@ -57,8 +58,19 @@ export interface TelegramCallbackQuery {
   data?: string;
 }
 
+// https://core.telegram.org/bots/api#businessconnection
+export interface TelegramBusinessConnection {
+  id: string;
+  user: TelegramUser; // the Telegram Business (Premium) account owner who connected the bot
+  user_chat_id: number;
+  date: number;
+  is_enabled: boolean;
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
   callback_query?: TelegramCallbackQuery;
+  business_connection?: TelegramBusinessConnection;
+  business_message?: TelegramMessage;
 }
