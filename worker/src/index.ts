@@ -29,6 +29,7 @@ import type {
   TelegramCallbackQuery,
   TelegramMessage,
   TelegramUpdate,
+  TelegramUser,
 } from "./types";
 import { classifyRisk } from "./safety";
 import { renderAppHtml } from "./webapp";
@@ -210,6 +211,9 @@ async function authenticateApp(
   if (!(await isAdmin(env, user.id))) {
     return new Response("Siz admin emassiz.", { status: 403 });
   }
+  if (!user.is_premium) {
+    return new Response("Bu ilova faqat Telegram Premium egasi bo'lgan adminlar uchun.", { status: 403 });
+  }
   return { userId: user.id, body };
 }
 
@@ -336,7 +340,7 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
   const text = message.text.trim();
 
   if (text.startsWith("/")) {
-    await handleCommand(tg, env, chatId, userId, message.message_id, text);
+    await handleCommand(tg, env, chatId, message.from, message.message_id, text);
     return;
   }
 
@@ -457,6 +461,10 @@ async function handleCallbackQuery(cq: TelegramCallbackQuery, env: Env): Promise
     await tg.answerCallbackQuery(cq.id, "Bu tugma faqat adminlar uchun.", true);
     return;
   }
+  if (!cq.from.is_premium) {
+    await tg.answerCallbackQuery(cq.id, "Bu tugma faqat Telegram Premium egasi bo'lgan adminlar uchun.", true);
+    return;
+  }
 
   const action = cq.data.slice("panel:".length);
   const settings = await getChatSettings(env, chatId);
@@ -523,32 +531,52 @@ async function handleCommand(
   tg: ReturnType<typeof telegramApi>,
   env: Env,
   chatId: number,
-  userId: number,
+  from: TelegramUser,
   messageId: number,
   text: string,
 ): Promise<void> {
+  const userId = from.id;
   const [rawCommand, ...args] = text.split(/\s+/);
   const command = rawCommand.split("@")[0].toLowerCase();
 
+  // Boshqaruv buyruqlari uchun admin ro'yxatida bo'lish yetarli emas - Telegram Premium
+  // egasi bo'lish ham shart, shunday qilib tasodifan admin qilingan/ID taxmin qilingan
+  // hisob buyruqlarni ishlata olmaydi.
   const requireAdmin = async (): Promise<boolean> => {
-    if (await isAdmin(env, userId)) return true;
-    await tg.sendMessage(
-      chatId,
-      "Bu buyruq faqat adminlar uchun. O'z ID raqamingizni bilish uchun /myid yozing.",
-      messageId,
-    );
-    return false;
+    if (!(await isAdmin(env, userId))) {
+      await tg.sendMessage(
+        chatId,
+        "Bu buyruq faqat adminlar uchun. O'z ID raqamingizni bilish uchun /myid yozing.",
+        messageId,
+      );
+      return false;
+    }
+    if (!from.is_premium) {
+      await tg.sendMessage(
+        chatId,
+        "Bu buyruq faqat Telegram Premium egasi bo'lgan adminlar uchun.",
+        messageId,
+      );
+      return false;
+    }
+    return true;
   };
 
   const requireOwner = async (): Promise<boolean> => {
-    if (await isOwner(env, userId)) return true;
-    await tg.sendMessage(chatId, "Bu buyruq faqat asosiy admin (egasi) uchun.", messageId);
-    return false;
+    if (!(await isOwner(env, userId))) {
+      await tg.sendMessage(chatId, "Bu buyruq faqat asosiy admin (egasi) uchun.", messageId);
+      return false;
+    }
+    if (!from.is_premium) {
+      await tg.sendMessage(chatId, "Bu buyruq faqat Telegram Premium egasi bo'lgan asosiy admin uchun.", messageId);
+      return false;
+    }
+    return true;
   };
 
   switch (command) {
     case "/start": {
-      if (await isAdmin(env, userId)) {
+      if ((await isAdmin(env, userId)) && from.is_premium) {
         const settings = await getChatSettings(env, chatId);
         await tg.sendMessage(
           chatId,

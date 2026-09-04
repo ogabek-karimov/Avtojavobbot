@@ -37,6 +37,7 @@ export interface TelegramUser {
   is_bot: boolean;
   first_name: string;
   username?: string;
+  is_premium?: boolean;
 }
 
 export interface TelegramChat {
