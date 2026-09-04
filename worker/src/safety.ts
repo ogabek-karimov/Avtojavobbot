@@ -87,6 +87,24 @@ const PHRASE_PATTERNS: string[] = [
   "kill him",
   "kill her",
   "rob a bank",
+
+  // Haqorat / so'kish (ko'p so'zli iboralar)
+  "onani skay",
+  "onani sikay",
+  "onangni sikay",
+  "onangni skay",
+  "enangni sikay",
+  "enangni skay",
+  "ayangni sikay",
+  "ayangni skay",
+  "kallangga sikay",
+  "kallangga sikaman",
+  "eshshak siksin",
+  "eshak siksin",
+  "ewak siksin",
+  "ittan tarqagan",
+  "it emgan",
+  "buvini ami",
 ];
 
 // Qisqa, alohida so'zlar - faqat butun so'z sifatida uchrasa moslashtiriladi
@@ -133,6 +151,30 @@ const WORD_PATTERNS: string[] = [
   "quron",
   "injil",
   "tavrot",
+
+  // Haqorat / so'kish (bitta so'zli)
+  "ko't",
+  "kot",
+  "go't",
+  "yban",
+  "dalbay",
+  "dalbayop",
+  "xarip",
+  "jalap",
+  "jalab",
+  "om",
+  "qoto",
+  "qotoq",
+  "qo'toq",
+  "qo'togim",
+  "qo'tog'im",
+  "ybanazavr",
+  "gandon",
+  "suka",
+  "xaromi",
+  "sikaman",
+  "sikdim",
+  "sikilding",
 ];
 
 function escapeRegExp(s: string): string {
@@ -152,10 +194,11 @@ const CLASSIFIER_SYSTEM_PROMPT =
   "Siz xabarlarni xavfsizlik bo'yicha tasniflaydigan tekshiruvchisiz. Foydalanuvchi xabarida quyidagi " +
   "mavzulardan BIRI bo'lsa - pul yoki maxfiy kod (parol/SMS/OTP/karta) so'rash yoki firibgarlik, terrorizm " +
   "yoki zo'ravonlik, o'ldirish/portlatish/o'g'irlik/talon-torojga chaqiruv, chet eldan pul o'tkazish taklifi, " +
-  "jinsiy yoki intim mazmun, yoki har qanday diniy mavzu - shularning FAQAT birortasi bo'lsa ham, faqat bitta " +
-  "so'z bilan javob bering: RISKY. Aks holda faqat bitta so'z bilan javob bering: SAFE. Boshqa hech narsa " +
-  "yozmang, izoh bermang. Xabar qaysi tilda yozilgan bo'lishidan (o'zbek, rus, ingliz, xitoy yoki boshqa " +
-  "istalgan til) qat'iy nazar shu qoidani bab-baravar qo'llang.";
+  "jinsiy yoki intim mazmun, har qanday diniy mavzu, yoki haqorat/so'kinish/qo'pol tahqirlovchi so'zlar - " +
+  "shularning FAQAT birortasi bo'lsa ham, faqat bitta so'z bilan javob bering: RISKY. Aks holda faqat bitta " +
+  "so'z bilan javob bering: SAFE. Boshqa hech narsa yozmang, izoh bermang. Xabar qaysi tilda yozilgan " +
+  "bo'lishidan (o'zbek, rus, ingliz, xitoy yoki boshqa istalgan til) qat'iy nazar shu qoidani bab-baravar " +
+  "qo'llang.";
 
 /**
  * Language-agnostic second layer: asks the model itself whether the message falls into a
