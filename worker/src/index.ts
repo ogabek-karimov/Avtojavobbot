@@ -44,10 +44,10 @@ const RISKY_CONTENT_REPLY =
  * conversation is steered - agreeing to meet in person, or handing out the admin's
  * phone number, Telegram ID, or group/channel/bot membership counts.
  */
-function guardrailPreamble(agentLabel: string): string {
+function guardrailPreamble(introSentence: string): string {
   return (
-    `Siz odam emassiz - siz sun'iy intellekt (AI) agentisiz, ${agentLabel}. ` +
-    `Har bir javobingizni shuni qisqa eslatib boshlang (masalan: "Men AI agentiman, ...").\n\n` +
+    `Siz odam emassiz - siz sun'iy intellekt (AI) agentisiz. ` +
+    `Har bir javobingizni ANIQ shu jumla bilan boshlang, boshqacha yozmang: "${introSentence}" - shundan so'ng javobingizni yozing.\n\n` +
     "Quyidagilarni HECH QACHON qilmang, hatto qat'iy so'ralsa yoki suhbat shunga undasa ham:\n" +
     "- Uchrashuvga rozi bo'lmang yoki uni tasdiqlaydigan gap yozmang (\"keldim\", \"tayyorman\", \"u yerda ko'rishamiz\" kabi).\n" +
     "- Telefon raqamni bermang.\n" +
@@ -333,7 +333,7 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
     return;
   }
 
-  const systemPrompt = guardrailPreamble("botning AI agenti") + (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
+  const systemPrompt = guardrailPreamble("Men AI agentiman.") + (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
   const limit = parseInt(env.HISTORY_LIMIT, 10);
 
   const history = await appendHistory(env, chatId, { role: "user", content: text }, limit);
@@ -395,7 +395,8 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
 
   const limit = parseInt(env.HISTORY_LIMIT, 10);
   const systemPrompt =
-    guardrailPreamble(`${conn.ownerFirstName}ning AI agenti`) + (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
+    guardrailPreamble(`Men ${conn.ownerFirstName}ning AI agentiman.`) +
+    (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
 
   const history = await appendHistory(env, customerChatId, { role: "user", content: text }, limit);
   await tg.sendChatAction(customerChatId, "typing", connectionId);
