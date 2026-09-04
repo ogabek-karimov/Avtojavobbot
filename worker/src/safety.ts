@@ -213,6 +213,9 @@ export async function isRiskyViaAI(env: Env, text: string): Promise<boolean> {
         { role: "system", content: CLASSIFIER_SYSTEM_PROMPT },
         { role: "user", content: text },
       ],
+      // Bu klassifikator uchun ijodkorlik kerak emas - past temperature bir xil xabarga
+      // doim bir xil (barqaror) javob qaytarish ehtimolini oshiradi.
+      temperature: 0,
     } as never)) as { response?: string };
     return (result?.response ?? "").toUpperCase().includes("RISKY");
   } catch (error) {
