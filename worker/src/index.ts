@@ -3,18 +3,25 @@ import { getReply } from "./claude";
 import { telegramApi, type InlineKeyboard } from "./telegram";
 import {
   addAdmin,
+  addFaqEntry,
   appendHistory,
   clearHistory,
   getAdmins,
   getChatSettings,
+  getFaq,
+  getStats,
   isAdmin,
+  matchFaq,
+  recordAutoReplyInteraction,
   removeAdmin,
+  removeFaqEntry,
   setChatSettings,
 } from "./store";
 import type { ChatSettings, Env, TelegramCallbackQuery, TelegramUpdate } from "./types";
 import { renderAppHtml } from "./webapp";
 
 const HELP_TEXT = `/panel - boshqaruv panelini ochish (tugmalar bilan, faqat adminlar)
+/stats - hisobot: nechta userga javob berdi, nechtasi javob qaytardi (faqat adminlar)
 /autoreply_on - shu chatda AI avto-javobni yoqish (faqat adminlar)
 /autoreply_off - shu chatda AI avto-javobni o'chirish (faqat adminlar)
 /setprompt <matn> - shu chat uchun AI ko'rsatmasini (persona) sozlash (faqat adminlar)
@@ -43,7 +50,10 @@ function panelKeyboard(settings: ChatSettings): InlineKeyboard {
         { text: "🔄 Holatni yangilash", callback_data: "panel:refresh" },
         { text: "👥 Adminlar", callback_data: "panel:listadmins" },
       ],
-      [{ text: "✏️ Ko'rsatmani o'zgartirish", callback_data: "panel:promptinfo" }],
+      [
+        { text: "✏️ Ko'rsatmani o'zgartirish", callback_data: "panel:promptinfo" },
+        { text: "📈 Hisobot", callback_data: "panel:stats" },
+      ],
     ],
   };
 }
@@ -117,9 +127,13 @@ async function authenticateApp(
 }
 
 async function buildAppState(env: Env, chatId: number) {
-  const settings = await getChatSettings(env, chatId);
-  const admins = await getAdmins(env);
-  return { settings, admins, defaultPrompt: env.DEFAULT_SYSTEM_PROMPT };
+  const [settings, admins, faq, stats] = await Promise.all([
+    getChatSettings(env, chatId),
+    getAdmins(env),
+    getFaq(env, chatId),
+    getStats(env),
+  ]);
+  return { settings, admins, faq, stats, defaultPrompt: env.DEFAULT_SYSTEM_PROMPT };
 }
 
 async function handleApiState(request: Request, env: Env): Promise<Response> {
@@ -172,6 +186,19 @@ async function handleApiAction(request: Request, env: Env): Promise<Response> {
       await removeAdmin(env, targetId);
       break;
     }
+    case "add_faq": {
+      const trigger = typeof body.trigger === "string" ? body.trigger.trim() : "";
+      const reply = typeof body.reply === "string" ? body.reply.trim() : "";
+      if (!trigger || !reply) return new Response("Kalit so'z va javob bo'sh bo'lmasin.", { status: 400 });
+      await addFaqEntry(env, userId, { trigger, reply });
+      break;
+    }
+    case "remove_faq": {
+      const index = typeof body.index === "number" ? body.index : parseInt(value, 10);
+      if (Number.isNaN(index)) return new Response("Noto'g'ri index.", { status: 400 });
+      await removeFaqEntry(env, userId, index);
+      break;
+    }
     default:
       return new Response("Noma'lum amal.", { status: 400 });
   }
@@ -203,6 +230,15 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
 
   const settings = await getChatSettings(env, chatId);
   if (!settings.autoreply) return;
+
+  await recordAutoReplyInteraction(env, userId);
+
+  const faq = await getFaq(env, chatId);
+  const faqReply = matchFaq(faq, text);
+  if (faqReply) {
+    await tg.sendMessage(chatId, faqReply);
+    return;
+  }
 
   const systemPrompt = settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT;
   const limit = parseInt(env.HISTORY_LIMIT, 10);
@@ -255,6 +291,16 @@ async function handleCallbackQuery(cq: TelegramCallbackQuery, env: Env): Promise
       const list = admins.length > 0 ? admins.join(", ") : "yo'q";
       await tg.answerCallbackQuery(cq.id, `Adminlar: ${list}`, true);
       return; // panel matni o'zgarmadi, qayta chizish shart emas
+    }
+
+    case "stats": {
+      const stats = await getStats(env);
+      await tg.answerCallbackQuery(
+        cq.id,
+        `📈 Bot javob bergan: ${stats.repliedCount}\n💬 Javob qaytarganlar: ${stats.respondedCount}`,
+        true,
+      );
+      return; // panel matni o'zgarmadi
     }
 
     case "promptinfo":
@@ -330,6 +376,16 @@ async function handleCommand(
         panelText(settings, env),
         undefined,
         panelKeyboardWithApp(settings, `${env.APP_BASE_URL}/app`),
+      );
+      return;
+    }
+
+    case "/stats": {
+      if (!(await requireAdmin())) return;
+      const stats = await getStats(env);
+      await tg.sendMessage(
+        chatId,
+        `📈 Bot javob bergan foydalanuvchilar: ${stats.repliedCount}\n💬 Javob qaytarganlar: ${stats.respondedCount}`,
       );
       return;
     }

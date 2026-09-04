@@ -1,5 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic_ from "@anthropic-ai/sdk";
 import type { Env, HistoryMessage } from "./types";
+
+// output_config.effort only exists on the Opus/Sonnet-5-and-newer tier; Haiku (and other
+// older/cheaper models) reject it with a 400. Gate it by model family instead of always sending it.
+function supportsEffort(model: string): boolean {
+  return !model.includes("haiku");
+}
 
 export async function getReply(
   env: Env,
@@ -10,13 +17,17 @@ export async function getReply(
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
   try {
-    const response = await client.messages.create({
+    const params: Anthropic_.MessageCreateParamsNonStreaming = {
       model: env.CLAUDE_MODEL,
       max_tokens: parseInt(env.CLAUDE_MAX_TOKENS, 10),
       system: systemPrompt,
-      output_config: { effort: env.CLAUDE_EFFORT as "low" | "medium" | "high" | "xhigh" | "max" },
       messages: history,
-    });
+    };
+    if (supportsEffort(env.CLAUDE_MODEL)) {
+      params.output_config = { effort: env.CLAUDE_EFFORT as "low" | "medium" | "high" | "xhigh" | "max" };
+    }
+
+    const response = await client.messages.create(params);
 
     if (response.stop_reason === "refusal") {
       return "Bu so'rovga javob bera olmayman.";

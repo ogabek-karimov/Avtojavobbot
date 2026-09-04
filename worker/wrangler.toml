@@ -8,7 +8,7 @@ id = "2d5a17bfa63b45beb593c9079736eadb"
 
 [vars]
 ADMIN_IDS = "123456789"
-CLAUDE_MODEL = "claude-opus-5"
+CLAUDE_MODEL = "claude-haiku-4-5"
 CLAUDE_MAX_TOKENS = "1024"
 CLAUDE_EFFORT = "low"
 HISTORY_LIMIT = "20"

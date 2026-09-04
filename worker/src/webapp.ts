@@ -108,6 +108,33 @@ export function renderAppHtml(): string {
     </div>
 
     <div class="card">
+      <div class="label">📈 Hisobot</div>
+      <div class="row" style="margin-top:10px">
+        <div>
+          <div class="hint">Bot javob bergan foydalanuvchilar</div>
+        </div>
+        <div id="statRepliedCount" style="font-size:20px; font-weight:700">0</div>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <div>
+          <div class="hint">Javob qaytarganlar</div>
+        </div>
+        <div id="statRespondedCount" style="font-size:20px; font-weight:700">0</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label">💬 Tez javoblar (FAQ)</div>
+      <div class="hint">Xabarda kalit so'z uchrasa, AI o'rniga shu javob avtomatik yuboriladi</div>
+      <div id="faqList"></div>
+      <div class="btn-row" style="flex-direction:column; align-items:stretch">
+        <input type="text" id="faqTrigger" placeholder="Kalit so'z (masalan: narx)" />
+        <textarea id="faqReply" placeholder="Javob matni" style="min-height:60px"></textarea>
+        <button id="addFaqBtn">Qo'shish</button>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="label">Adminlar</div>
       <div id="adminList"></div>
       <div class="btn-row">
@@ -166,11 +193,48 @@ export function renderAppHtml(): string {
     }
   }
 
+  function renderFaq(faq) {
+    const faqListEl = document.getElementById("faqList");
+    faqListEl.innerHTML = "";
+    if (faq.length === 0) {
+      faqListEl.innerHTML = '<div class="hint" style="padding:6px 0">Hali qo\\'shilmagan</div>';
+      return;
+    }
+    faq.forEach((entry, index) => {
+      const row = document.createElement("div");
+      row.className = "admin-item";
+      row.style.alignItems = "flex-start";
+      const textWrap = document.createElement("div");
+      textWrap.innerHTML =
+        '<div style="font-weight:600">' + escapeHtml(entry.trigger) + "</div>" +
+        '<div class="hint">' + escapeHtml(entry.reply) + "</div>";
+      const btn = document.createElement("button");
+      btn.className = "danger";
+      btn.textContent = "O'chirish";
+      btn.style.padding = "6px 10px";
+      btn.style.fontSize = "12px";
+      btn.style.flexShrink = "0";
+      btn.onclick = () => removeFaq(index);
+      row.appendChild(textWrap);
+      row.appendChild(btn);
+      faqListEl.appendChild(row);
+    });
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
   function render(state) {
     currentState = state;
     autoreplyToggle.checked = state.settings.autoreply;
     promptInput.value = state.settings.prompt ?? state.defaultPrompt;
     renderAdmins(state.admins);
+    renderFaq(state.faq);
+    document.getElementById("statRepliedCount").textContent = state.stats.repliedCount;
+    document.getElementById("statRespondedCount").textContent = state.stats.respondedCount;
   }
 
   async function load() {
@@ -232,6 +296,34 @@ export function renderAppHtml(): string {
   async function removeAdmin(id) {
     try {
       const state = await api("/api/action", { action: "remove_admin", value: String(id) });
+      render(state);
+    } catch (e) {
+      tg.showAlert("Xatolik: " + e.message);
+    }
+  }
+
+  document.getElementById("addFaqBtn").addEventListener("click", async () => {
+    const triggerInput = document.getElementById("faqTrigger");
+    const replyInput = document.getElementById("faqReply");
+    const trigger = triggerInput.value.trim();
+    const reply = replyInput.value.trim();
+    if (!trigger || !reply) {
+      tg.showAlert("Kalit so'z va javob matnini kiriting.");
+      return;
+    }
+    try {
+      const state = await api("/api/action", { action: "add_faq", trigger, reply });
+      render(state);
+      triggerInput.value = "";
+      replyInput.value = "";
+    } catch (e) {
+      tg.showAlert("Xatolik: " + e.message);
+    }
+  });
+
+  async function removeFaq(index) {
+    try {
+      const state = await api("/api/action", { action: "remove_faq", index });
       render(state);
     } catch (e) {
       tg.showAlert("Xatolik: " + e.message);

@@ -1,6 +1,8 @@
-import type { ChatSettings, Env, HistoryMessage } from "./types";
+import type { ChatSettings, Env, FaqEntry, HistoryMessage } from "./types";
 
 const ADMINS_KEY = "admins";
+const STATS_REPLIED_KEY = "stats:replied_users";
+const STATS_RESPONDED_KEY = "stats:responded_users";
 
 function chatSettingsKey(chatId: number): string {
   return `chat:${chatId}:settings`;
@@ -8,6 +10,10 @@ function chatSettingsKey(chatId: number): string {
 
 function chatHistoryKey(chatId: number): string {
   return `chat:${chatId}:history`;
+}
+
+function chatFaqKey(chatId: number): string {
+  return `chat:${chatId}:faq`;
 }
 
 /** Reads the admin list from KV, seeding it from ADMIN_IDS on first use. */
@@ -81,4 +87,71 @@ export async function appendHistory(
 
 export async function clearHistory(env: Env, chatId: number): Promise<void> {
   await env.BOT_KV.delete(chatHistoryKey(chatId));
+}
+
+export async function getFaq(env: Env, chatId: number): Promise<FaqEntry[]> {
+  const raw = await env.BOT_KV.get(chatFaqKey(chatId));
+  if (raw === null) return [];
+  return JSON.parse(raw) as FaqEntry[];
+}
+
+export async function addFaqEntry(env: Env, chatId: number, entry: FaqEntry): Promise<void> {
+  const list = await getFaq(env, chatId);
+  list.push(entry);
+  await env.BOT_KV.put(chatFaqKey(chatId), JSON.stringify(list));
+}
+
+export async function removeFaqEntry(env: Env, chatId: number, index: number): Promise<boolean> {
+  const list = await getFaq(env, chatId);
+  if (index < 0 || index >= list.length) return false;
+  list.splice(index, 1);
+  await env.BOT_KV.put(chatFaqKey(chatId), JSON.stringify(list));
+  return true;
+}
+
+/** Case-insensitive substring match: the first FAQ entry whose trigger appears in the message wins. */
+export function matchFaq(list: FaqEntry[], text: string): string | null {
+  const lower = text.toLowerCase();
+  for (const entry of list) {
+    const trigger = entry.trigger.trim().toLowerCase();
+    if (trigger && lower.includes(trigger)) return entry.reply;
+  }
+  return null;
+}
+
+async function getIdSet(env: Env, key: string): Promise<Set<number>> {
+  const raw = await env.BOT_KV.get(key);
+  if (!raw) return new Set();
+  return new Set(JSON.parse(raw) as number[]);
+}
+
+async function putIdSet(env: Env, key: string, ids: Set<number>): Promise<void> {
+  await env.BOT_KV.put(key, JSON.stringify([...ids]));
+}
+
+/**
+ * Call once per incoming auto-reply-eligible message, before sending the reply.
+ * Tracks two counters: how many distinct users the bot has ever replied to, and
+ * how many of those users sent a follow-up message afterwards (i.e. replied back).
+ */
+export async function recordAutoReplyInteraction(env: Env, userId: number): Promise<void> {
+  const repliedUsers = await getIdSet(env, STATS_REPLIED_KEY);
+  if (repliedUsers.has(userId)) {
+    const respondedUsers = await getIdSet(env, STATS_RESPONDED_KEY);
+    if (!respondedUsers.has(userId)) {
+      respondedUsers.add(userId);
+      await putIdSet(env, STATS_RESPONDED_KEY, respondedUsers);
+    }
+    return;
+  }
+  repliedUsers.add(userId);
+  await putIdSet(env, STATS_REPLIED_KEY, repliedUsers);
+}
+
+export async function getStats(env: Env): Promise<{ repliedCount: number; respondedCount: number }> {
+  const [repliedUsers, respondedUsers] = await Promise.all([
+    getIdSet(env, STATS_REPLIED_KEY),
+    getIdSet(env, STATS_RESPONDED_KEY),
+  ]);
+  return { repliedCount: repliedUsers.size, respondedCount: respondedUsers.size };
 }

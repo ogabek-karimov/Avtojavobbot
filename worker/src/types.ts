@@ -22,6 +22,11 @@ export interface HistoryMessage {
   content: string;
 }
 
+export interface FaqEntry {
+  trigger: string;
+  reply: string;
+}
+
 // Minimal Telegram types - just the fields this bot actually reads.
 export interface TelegramUser {
   id: number;
