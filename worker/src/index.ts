@@ -398,7 +398,7 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
   if (vip) {
     const ownerName = (await tg.getChatFirstName(ownerId)) ?? "Admin";
     await tg.sendMessage(chatId, vipHoldingMessage(ownerName));
-    if (userId !== ownerId) {
+    if (!(await isAdmin(env, userId))) {
       await tg.sendMessage(ownerId, vipNotification(vip, senderLabel(message.from), text));
     }
     return;
@@ -430,7 +430,7 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
   await appendHistory(env, chatId, { role: "assistant", content: aiText }, limit);
   const reply = `${introSentence(null)}\n\n${aiText}`;
   await tg.sendMessage(chatId, reply);
-  if (userId !== ownerId) {
+  if (!(await isAdmin(env, userId))) {
     await tg.sendMessage(ownerId, conversationNotification(senderLabel(message.from), text, aiText));
   }
 }
@@ -479,7 +479,9 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
   const vip = findVip(await getVipList(env, conn.ownerId), message.from.id);
   if (vip) {
     await tg.sendMessage(customerChatId, vipHoldingMessage(liveOwnerName), undefined, undefined, connectionId);
-    await tg.sendMessage(conn.ownerId, vipNotification(vip, senderLabel(message.from), text));
+    if (!(await isAdmin(env, message.from.id))) {
+      await tg.sendMessage(conn.ownerId, vipNotification(vip, senderLabel(message.from), text));
+    }
     return;
   }
 
@@ -509,7 +511,9 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
   await appendHistory(env, customerChatId, { role: "assistant", content: aiText }, limit);
   const reply = `${introSentence(liveOwnerName)}\n\n${aiText}`;
   await tg.sendMessage(customerChatId, reply, undefined, undefined, connectionId);
-  await tg.sendMessage(conn.ownerId, conversationNotification(senderLabel(message.from), text, aiText));
+  if (!(await isAdmin(env, message.from.id))) {
+    await tg.sendMessage(conn.ownerId, conversationNotification(senderLabel(message.from), text, aiText));
+  }
 }
 
 async function handleCallbackQuery(cq: TelegramCallbackQuery, env: Env): Promise<void> {
