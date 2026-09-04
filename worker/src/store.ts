@@ -1,4 +1,4 @@
-import type { ChatSettings, Env, FaqEntry, HistoryMessage } from "./types";
+import type { ChatSettings, Env, FaqEntry, HistoryMessage, VipEntry } from "./types";
 
 const ADMINS_KEY = "admins";
 const OWNER_KEY = "owner";
@@ -15,6 +15,10 @@ function chatHistoryKey(chatId: number): string {
 
 function chatFaqKey(chatId: number): string {
   return `chat:${chatId}:faq`;
+}
+
+function chatVipKey(chatId: number): string {
+  return `chat:${chatId}:vip`;
 }
 
 function businessConnectionKey(connectionId: string): string {
@@ -154,6 +158,30 @@ export function matchFaq(list: FaqEntry[], text: string): string | null {
     if (trigger && lower.includes(trigger)) return entry.reply;
   }
   return null;
+}
+
+export async function getVipList(env: Env, chatId: number): Promise<VipEntry[]> {
+  const raw = await env.BOT_KV.get(chatVipKey(chatId));
+  if (raw === null) return [];
+  return JSON.parse(raw) as VipEntry[];
+}
+
+export async function addVipEntry(env: Env, chatId: number, entry: VipEntry): Promise<void> {
+  const list = await getVipList(env, chatId);
+  list.push(entry);
+  await env.BOT_KV.put(chatVipKey(chatId), JSON.stringify(list));
+}
+
+export async function removeVipEntry(env: Env, chatId: number, index: number): Promise<boolean> {
+  const list = await getVipList(env, chatId);
+  if (index < 0 || index >= list.length) return false;
+  list.splice(index, 1);
+  await env.BOT_KV.put(chatVipKey(chatId), JSON.stringify(list));
+  return true;
+}
+
+export function findVip(list: VipEntry[], userId: number): VipEntry | null {
+  return list.find((v) => v.id === userId) ?? null;
 }
 
 async function getIdSet(env: Env, key: string): Promise<Set<number>> {

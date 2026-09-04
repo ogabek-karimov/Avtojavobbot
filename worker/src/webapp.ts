@@ -135,6 +135,17 @@ export function renderAppHtml(): string {
     </div>
 
     <div class="card">
+      <div class="label">⚠️ VIP ro'yxat</div>
+      <div class="hint">Bu ro'yxatdagi odam yozsa, AI umuman javob bermaydi - ularga "shaxsan javob beraman" xabari ketadi, sizga esa shoshilinch bildirishnoma keladi</div>
+      <div id="vipList" style="margin-top:8px"></div>
+      <div class="btn-row">
+        <input type="text" id="vipId" placeholder="Telegram ID" inputmode="numeric" />
+        <input type="text" id="vipRole" placeholder="Rol (masalan: Boshliq)" />
+        <button id="addVipBtn">Qo'shish</button>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="label">Adminlar</div>
       <div class="hint">👑 - asosiy admin (egasi). Qolganlari - kichik adminlar.</div>
       <div id="adminList" style="margin-top:8px"></div>
@@ -257,6 +268,30 @@ export function renderAppHtml(): string {
     });
   }
 
+  function renderVip(vip) {
+    const vipListEl = document.getElementById("vipList");
+    vipListEl.innerHTML = "";
+    if (vip.length === 0) {
+      vipListEl.innerHTML = '<div class="hint" style="padding:6px 0">Hali qo\\'shilmagan</div>';
+      return;
+    }
+    vip.forEach((entry, index) => {
+      const row = document.createElement("div");
+      row.className = "admin-item";
+      const span = document.createElement("span");
+      span.textContent = entry.role + " - " + entry.id;
+      const btn = document.createElement("button");
+      btn.className = "danger";
+      btn.textContent = "O'chirish";
+      btn.style.padding = "6px 10px";
+      btn.style.fontSize = "12px";
+      btn.onclick = () => removeVip(index);
+      row.appendChild(span);
+      row.appendChild(btn);
+      vipListEl.appendChild(row);
+    });
+  }
+
   function escapeHtml(s) {
     const d = document.createElement("div");
     d.textContent = s;
@@ -273,6 +308,7 @@ export function renderAppHtml(): string {
     document.getElementById("adminManageArea").hidden = !isOwnerMe;
     document.getElementById("adminManageHint").hidden = isOwnerMe;
     renderFaq(state.faq);
+    renderVip(state.vip);
     document.getElementById("statRepliedCount").textContent = state.stats.repliedCount;
     document.getElementById("statRespondedCount").textContent = state.stats.respondedCount;
   }
@@ -383,6 +419,34 @@ export function renderAppHtml(): string {
   async function removeFaq(index) {
     try {
       const state = await api("/api/action", { action: "remove_faq", index });
+      render(state);
+    } catch (e) {
+      tg.showAlert("Xatolik: " + e.message);
+    }
+  }
+
+  document.getElementById("addVipBtn").addEventListener("click", async () => {
+    const idInput = document.getElementById("vipId");
+    const roleInput = document.getElementById("vipRole");
+    const id = idInput.value.trim();
+    const role = roleInput.value.trim();
+    if (!id || !role) {
+      tg.showAlert("ID va rolni kiriting.");
+      return;
+    }
+    try {
+      const state = await api("/api/action", { action: "add_vip", id, role });
+      render(state);
+      idInput.value = "";
+      roleInput.value = "";
+    } catch (e) {
+      tg.showAlert("Xatolik: " + e.message);
+    }
+  });
+
+  async function removeVip(index) {
+    try {
+      const state = await api("/api/action", { action: "remove_vip", index });
       render(state);
     } catch (e) {
       tg.showAlert("Xatolik: " + e.message);

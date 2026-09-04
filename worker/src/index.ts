@@ -4,20 +4,24 @@ import { telegramApi, type InlineKeyboard } from "./telegram";
 import {
   addAdmin,
   addFaqEntry,
+  addVipEntry,
   appendHistory,
   clearHistory,
+  findVip,
   getAdmins,
   getBusinessConnection,
   getChatSettings,
   getFaq,
   getOwner,
   getStats,
+  getVipList,
   isAdmin,
   isOwner,
   matchFaq,
   recordAutoReplyInteraction,
   removeAdmin,
   removeFaqEntry,
+  removeVipEntry,
   setBusinessConnection,
   setChatSettings,
   transferOwnership,
@@ -30,6 +34,7 @@ import type {
   TelegramMessage,
   TelegramUpdate,
   TelegramUser,
+  VipEntry,
 } from "./types";
 import { classifyRisk } from "./safety";
 import { renderAppHtml } from "./webapp";
@@ -80,6 +85,26 @@ function guardrailPreamble(): string {
 /** The literal, code-guaranteed AI-disclosure line prepended to every auto-reply. */
 function introSentence(ownerName: string | null): string {
   return ownerName ? `🤖 Men ${ownerName}ning AI agentiman.` : "🤖 Men AI agentiman.";
+}
+
+/** Sent to a VIP-listed sender instead of an AI reply - AI never handles their messages. */
+function vipHoldingMessage(ownerName: string): string {
+  return `${introSentence(ownerName)}\n\nTez orada ${ownerName} sizga shaxsan javob beradi.`;
+}
+
+/** Urgent notification to the owner when someone on their VIP list writes. */
+function vipNotification(vip: VipEntry, from: string, text: string): string {
+  return `⚠️ VIP (${vip.role}) yozdi!\n${from}\n\n${text}`;
+}
+
+/** Keeps the owner in the loop on every AI-handled exchange (not sent for VIP/FAQ/blocked messages). */
+function conversationNotification(from: string, text: string, aiReply: string): string {
+  return `💬 ${from} yozdi:\n${text}\n\n🤖 AI javobi:\n${aiReply}`;
+}
+
+function senderLabel(user: TelegramUser): string {
+  const name = user.username ? `${user.first_name} (@${user.username})` : user.first_name;
+  return `${name} [ID: ${user.id}]`;
 }
 
 const HELP_TEXT = `/panel - boshqaruv panelini ochish (tugmalar bilan, faqat adminlar)
@@ -218,14 +243,15 @@ async function authenticateApp(
 }
 
 async function buildAppState(env: Env, chatId: number) {
-  const [settings, admins, ownerId, faq, stats] = await Promise.all([
+  const [settings, admins, ownerId, faq, vip, stats] = await Promise.all([
     getChatSettings(env, chatId),
     getAdmins(env),
     getOwner(env),
     getFaq(env, chatId),
+    getVipList(env, chatId),
     getStats(env),
   ]);
-  return { settings, admins, ownerId, faq, stats, defaultPrompt: env.DEFAULT_SYSTEM_PROMPT };
+  return { settings, admins, ownerId, faq, vip, stats, defaultPrompt: env.DEFAULT_SYSTEM_PROMPT };
 }
 
 async function handleApiState(request: Request, env: Env): Promise<Response> {
@@ -305,6 +331,19 @@ async function handleApiAction(request: Request, env: Env): Promise<Response> {
       await removeFaqEntry(env, userId, index);
       break;
     }
+    case "add_vip": {
+      const targetId = parseInt(typeof body.id === "string" ? body.id : value, 10);
+      const role = typeof body.role === "string" ? body.role.trim() : "";
+      if (Number.isNaN(targetId) || !role) return new Response("ID va rol bo'sh bo'lmasin.", { status: 400 });
+      await addVipEntry(env, userId, { id: targetId, role });
+      break;
+    }
+    case "remove_vip": {
+      const index = typeof body.index === "number" ? body.index : parseInt(value, 10);
+      if (Number.isNaN(index)) return new Response("Noto'g'ri index.", { status: 400 });
+      await removeVipEntry(env, userId, index);
+      break;
+    }
     default:
       return new Response("Noma'lum amal.", { status: 400 });
   }
@@ -349,6 +388,17 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
 
   await recordAutoReplyInteraction(env, userId);
 
+  const ownerId = await getOwner(env);
+  const vip = findVip(await getVipList(env, chatId), userId);
+  if (vip) {
+    const ownerName = (await tg.getChatFirstName(ownerId)) ?? "Admin";
+    await tg.sendMessage(chatId, vipHoldingMessage(ownerName));
+    if (userId !== ownerId) {
+      await tg.sendMessage(ownerId, vipNotification(vip, senderLabel(message.from), text));
+    }
+    return;
+  }
+
   const riskCategory = await classifyRisk(env, text);
   if (riskCategory === "profanity") {
     await tg.sendMessage(chatId, PROFANITY_REPLY);
@@ -375,6 +425,9 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
   await appendHistory(env, chatId, { role: "assistant", content: aiText }, limit);
   const reply = `${introSentence(null)}\n\n${aiText}`;
   await tg.sendMessage(chatId, reply);
+  if (userId !== ownerId) {
+    await tg.sendMessage(ownerId, conversationNotification(senderLabel(message.from), text, aiText));
+  }
 }
 
 /**
@@ -415,6 +468,16 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
 
   await recordAutoReplyInteraction(env, message.from.id);
 
+  // Kesh emas - har safar jonli o'qiladi, shunda profil ismi o'zgarsa ham darhol aks etadi.
+  const liveOwnerName = (await tg.getChatFirstName(conn.ownerId)) ?? conn.ownerFirstName;
+
+  const vip = findVip(await getVipList(env, conn.ownerId), message.from.id);
+  if (vip) {
+    await tg.sendMessage(customerChatId, vipHoldingMessage(liveOwnerName), undefined, undefined, connectionId);
+    await tg.sendMessage(conn.ownerId, vipNotification(vip, senderLabel(message.from), text));
+    return;
+  }
+
   const riskCategory = await classifyRisk(env, text);
   if (riskCategory === "profanity") {
     await tg.sendMessage(customerChatId, PROFANITY_REPLY, undefined, undefined, connectionId);
@@ -432,9 +495,6 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
     return;
   }
 
-  // Kesh emas - har safar jonli o'qiladi, shunda profil ismi o'zgarsa ham darhol aks etadi.
-  const liveOwnerName = (await tg.getChatFirstName(conn.ownerId)) ?? conn.ownerFirstName;
-
   const limit = parseInt(env.HISTORY_LIMIT, 10);
   const systemPrompt = guardrailPreamble() + (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
 
@@ -444,6 +504,7 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
   await appendHistory(env, customerChatId, { role: "assistant", content: aiText }, limit);
   const reply = `${introSentence(liveOwnerName)}\n\n${aiText}`;
   await tg.sendMessage(customerChatId, reply, undefined, undefined, connectionId);
+  await tg.sendMessage(conn.ownerId, conversationNotification(senderLabel(message.from), text, aiText));
 }
 
 async function handleCallbackQuery(cq: TelegramCallbackQuery, env: Env): Promise<void> {

@@ -31,6 +31,11 @@ export interface FaqEntry {
   reply: string;
 }
 
+export interface VipEntry {
+  id: number;
+  role: string;
+}
+
 // Minimal Telegram types - just the fields this bot actually reads.
 export interface TelegramUser {
   id: number;
