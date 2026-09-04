@@ -89,6 +89,23 @@ export function telegramApi(token: string) {
       }
     },
 
+    /** Live lookup (not cached) - used to always use the person's *current* Telegram display name. */
+    async getChatFirstName(chatId: number): Promise<string | null> {
+      try {
+        const res = await fetch(`${base}/getChat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId }),
+        });
+        if (!res.ok) return null;
+        const data = (await res.json()) as { ok: boolean; result?: { first_name?: string } };
+        return data.result?.first_name ?? null;
+      } catch (error) {
+        console.error("getChat failed", error);
+        return null;
+      }
+    },
+
     async setWebhook(url: string, secretToken: string): Promise<unknown> {
       const res = await fetch(`${base}/setWebhook`, {
         method: "POST",

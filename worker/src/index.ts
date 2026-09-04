@@ -393,10 +393,12 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
     return;
   }
 
+  // Kesh emas - har safar jonli o'qiladi, shunda profil ismi o'zgarsa ham darhol aks etadi.
+  const liveOwnerName = (await tg.getChatFirstName(conn.ownerId)) ?? conn.ownerFirstName;
+
   const limit = parseInt(env.HISTORY_LIMIT, 10);
   const systemPrompt =
-    guardrailPreamble(`Men ${conn.ownerFirstName}ning AI agentiman.`) +
-    (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
+    guardrailPreamble(`Men ${liveOwnerName}ning AI agentiman.`) + (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
 
   const history = await appendHistory(env, customerChatId, { role: "user", content: text }, limit);
   await tg.sendChatAction(customerChatId, "typing", connectionId);
