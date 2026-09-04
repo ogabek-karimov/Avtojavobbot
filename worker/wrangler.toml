@@ -1,0 +1,21 @@
+name = "avtojavobbot"
+main = "src/index.ts"
+compatibility_date = "2026-09-01"
+
+[[kv_namespaces]]
+binding = "BOT_KV"
+id = "2d5a17bfa63b45beb593c9079736eadb"
+
+[vars]
+ADMIN_IDS = "123456789"
+CLAUDE_MODEL = "claude-opus-5"
+CLAUDE_MAX_TOKENS = "1024"
+CLAUDE_EFFORT = "low"
+HISTORY_LIMIT = "20"
+APP_BASE_URL = "https://avtojavobbot.bek8896ok.workers.dev"
+DEFAULT_SYSTEM_PROMPT = "Siz foydalanuvchi nomidan Telegram orqali avtomatik javob beruvchi yordamchisiz. Qisqa, aniq va samimiy javob bering. Agar savolga ishonchli javob bera olmasangiz, buni ochiq ayting va foydalanuvchi tez orada shaxsan javob berishini bildiring."
+
+# Maxfiy qiymatlar (wrangler secret put orqali qo'yiladi, bu faylga yozilmaydi):
+#   TELEGRAM_BOT_TOKEN
+#   ANTHROPIC_API_KEY
+#   TELEGRAM_WEBHOOK_SECRET

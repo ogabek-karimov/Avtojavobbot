@@ -3,3 +3,5 @@ data/
 __pycache__/
 *.pyc
 .venv/
+worker/node_modules/
+worker/.wrangler/
