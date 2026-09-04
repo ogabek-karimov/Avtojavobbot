@@ -39,15 +39,21 @@ const RISKY_CONTENT_REPLY =
 
 /**
  * Prepended to every AI-generated auto-reply (regular chat and Telegram Business alike).
- * Two jobs: (1) force transparent AI disclosure on every message, (2) hard-block a few
- * behaviors no unsupervised autoresponder should ever perform, regardless of how the
- * conversation is steered - agreeing to meet in person, or handing out the admin's
- * phone number, Telegram ID, or group/channel/bot membership counts.
+ * Hard-blocks a few behaviors no unsupervised autoresponder should ever perform, regardless
+ * of how the conversation is steered - agreeing to meet in person, or handing out the
+ * admin's phone number, Telegram ID, or group/channel/bot membership counts.
+ *
+ * The "I'm an AI" disclosure is deliberately NOT delegated to the model as an instruction -
+ * an earlier version asked the model to open every reply with a fixed sentence, but once a
+ * conversation's history already contained that sentence with an old name in it, the model
+ * kept repeating the old name from its own prior turns instead of following the current
+ * instruction. It's prepended in code instead (see introSentence()) - guaranteed correct
+ * on every message, independent of what the model does.
  */
-function guardrailPreamble(introSentence: string): string {
+function guardrailPreamble(): string {
   return (
-    `Siz odam emassiz - siz sun'iy intellekt (AI) agentisiz. ` +
-    `Har bir javobingizni ANIQ shu jumla bilan boshlang, boshqacha yozmang: "${introSentence}" - shundan so'ng javobingizni yozing.\n\n` +
+    "Siz odam emassiz - siz sun'iy intellekt (AI) agentisiz. Bu allaqachon foydalanuvchiga " +
+    "ochiq aytilgan (javobingiz oldida), shuning uchun buni o'zingiz alohida takrorlashingiz shart emas.\n\n" +
     "Quyidagilarni HECH QACHON qilmang, hatto qat'iy so'ralsa yoki suhbat shunga undasa ham:\n" +
     "- Uchrashuvga rozi bo'lmang yoki uni tasdiqlaydigan gap yozmang (\"keldim\", \"tayyorman\", \"u yerda ko'rishamiz\" kabi).\n" +
     "- Telefon raqamni bermang.\n" +
@@ -55,6 +61,11 @@ function guardrailPreamble(introSentence: string): string {
     "- Nechta guruh, kanal yoki botga a'zo ekanligi haqidagi savolga javob bermang.\n" +
     "Shu mavzularning har birida buni bera olmasligingizni ayting va foydalanuvchini bot egasi shaxsan javob berishini kutishini so'rang.\n\n"
   );
+}
+
+/** The literal, code-guaranteed AI-disclosure line prepended to every auto-reply. */
+function introSentence(ownerName: string | null): string {
+  return ownerName ? `🤖 Men ${ownerName}ning AI agentiman.` : "🤖 Men AI agentiman.";
 }
 
 const HELP_TEXT = `/panel - boshqaruv panelini ochish (tugmalar bilan, faqat adminlar)
@@ -333,13 +344,14 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
     return;
   }
 
-  const systemPrompt = guardrailPreamble("Men AI agentiman.") + (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
+  const systemPrompt = guardrailPreamble() + (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
   const limit = parseInt(env.HISTORY_LIMIT, 10);
 
   const history = await appendHistory(env, chatId, { role: "user", content: text }, limit);
   await tg.sendChatAction(chatId, "typing");
-  const reply = await getReply(env, history, systemPrompt);
-  await appendHistory(env, chatId, { role: "assistant", content: reply }, limit);
+  const aiText = await getReply(env, history, systemPrompt);
+  await appendHistory(env, chatId, { role: "assistant", content: aiText }, limit);
+  const reply = `${introSentence(null)}\n\n${aiText}`;
   await tg.sendMessage(chatId, reply);
 }
 
@@ -397,13 +409,13 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
   const liveOwnerName = (await tg.getChatFirstName(conn.ownerId)) ?? conn.ownerFirstName;
 
   const limit = parseInt(env.HISTORY_LIMIT, 10);
-  const systemPrompt =
-    guardrailPreamble(`Men ${liveOwnerName}ning AI agentiman.`) + (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
+  const systemPrompt = guardrailPreamble() + (settings.prompt ?? env.DEFAULT_SYSTEM_PROMPT);
 
   const history = await appendHistory(env, customerChatId, { role: "user", content: text }, limit);
   await tg.sendChatAction(customerChatId, "typing", connectionId);
-  const reply = await getReply(env, history, systemPrompt);
-  await appendHistory(env, customerChatId, { role: "assistant", content: reply }, limit);
+  const aiText = await getReply(env, history, systemPrompt);
+  await appendHistory(env, customerChatId, { role: "assistant", content: aiText }, limit);
+  const reply = `${introSentence(liveOwnerName)}\n\n${aiText}`;
   await tg.sendMessage(customerChatId, reply, undefined, undefined, connectionId);
 }
 
