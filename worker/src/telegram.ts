@@ -4,6 +4,7 @@ export interface InlineKeyboardButton {
   text: string;
   callback_data?: string;
   web_app?: { url: string };
+  url?: string;
 }
 
 export interface InlineKeyboard {

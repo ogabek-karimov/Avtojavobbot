@@ -94,6 +94,9 @@ function panelKeyboard(settings: ChatSettings): InlineKeyboard {
 
 function panelKeyboardWithApp(settings: ChatSettings, appUrl: string): InlineKeyboard {
   const kb = panelKeyboard(settings);
+  kb.inline_keyboard.unshift([
+    { text: "🏢 Business sozlamalarini ochish", url: "tg://settings/business" },
+  ]);
   kb.inline_keyboard.unshift([{ text: "🖥 To'liq ilovani ochish", web_app: { url: appUrl } }]);
   return kb;
 }

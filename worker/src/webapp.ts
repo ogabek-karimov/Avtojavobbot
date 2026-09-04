@@ -147,17 +147,23 @@ export function renderAppHtml(): string {
       <div class="label">🏢 Telegram Business'ga ulash</div>
       <div class="hint" style="margin-top:6px">
         Bu bot shaxsiy Telegram akkountingizga ulanib, sizga yozganlarga siz nomingizdan
-        avtomatik javob bera oladi. Telegram texnik sabablarga ko'ra bu sozlamaga
-        tashqaridan to'g'ridan-to'g'ri o'tkazib qo'yishga ruxsat bermaydi - shuning uchun
-        quyidagi qadamlarni o'zingiz, Telegram ilovasida bajarishingiz kerak:
+        avtomatik javob bera oladi. Telegram bironta botga aynan bitta boshqa botni
+        avtomatik ulab qo'yishga ruxsat bermaydi - shuning uchun oxirgi 2 qadamni
+        (qidirish + qo'shish) o'zingiz bajarishingiz kerak, lekin tugma sizni to'g'ri
+        sahifaga bir bosishda olib boradi:
+      </div>
+      <div class="btn-row" style="margin-top:10px">
+        <a id="openBusinessSettings" href="tg://settings/business"
+           style="display:block; width:100%; text-align:center; text-decoration:none; padding:10px; border-radius:8px; background:var(--tg-theme-button-color,#2481cc); color:var(--tg-theme-button-text-color,#fff); font-weight:600">
+          Business sozlamalarini ochish
+        </a>
       </div>
       <div style="margin-top:12px; font-size:14px; line-height:1.6">
         <div><b>Talab:</b> Telegram Premium obunasi kerak (Business funksiyasi shu bilan keladi).</div>
-        <div style="margin-top:8px"><b>1.</b> Telegram → Sozlamalar (Settings)</div>
-        <div><b>2.</b> "Telegram Business" bo'limini oching</div>
-        <div><b>3.</b> "Chatbots" (yoki "Chat-botlar") ni tanlang</div>
-        <div><b>4.</b> Bot username kiriting: <b>@AvtojavobAibot</b> va "Add" bosing</div>
-        <div><b>5.</b> Ruxsatlarda "Reply to messages" (xabarlarga javob berish) yoqilganini tekshiring</div>
+        <div style="margin-top:8px"><b>1.</b> Yuqoridagi tugmani bosing</div>
+        <div><b>2.</b> "Chatbots" (yoki "Chat-botlarni avtomatlashtirish") ni tanlang</div>
+        <div><b>3.</b> Bot username kiriting: <b>@AvtojavobAibot</b> va "Add"/"Ulash" bosing</div>
+        <div><b>4.</b> Ruxsatlarda "Reply to messages" (xabarlarga javob berish) yoqilganini tekshiring</div>
       </div>
     </div>
   </div>
