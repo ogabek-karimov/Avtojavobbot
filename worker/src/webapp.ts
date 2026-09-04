@@ -153,10 +153,11 @@ export function renderAppHtml(): string {
         sahifaga bir bosishda olib boradi:
       </div>
       <div class="btn-row" style="margin-top:10px">
-        <a id="openBusinessSettings" href="tg://settings/business"
-           style="display:block; width:100%; text-align:center; text-decoration:none; padding:10px; border-radius:8px; background:var(--tg-theme-button-color,#2481cc); color:var(--tg-theme-button-text-color,#fff); font-weight:600">
-          Business sozlamalarini ochish
-        </a>
+        <button id="openBusinessSettings" style="width:100%">Business sozlamalarini ochish</button>
+      </div>
+      <div class="hint" id="businessBtnHint" style="margin-top:6px">
+        Agar tugma ochmasa: /panel buyrug'idagi "🏢 Business sozlamalarini ochish" tugmasi
+        (chatning o'zida, oyna ichida emas) ko'proq qurilmalarda ishonchli ishlaydi.
       </div>
       <div style="margin-top:12px; font-size:14px; line-height:1.6">
         <div><b>Talab:</b> Telegram Premium obunasi kerak (Business funksiyasi shu bilan keladi).</div>
@@ -353,6 +354,18 @@ export function renderAppHtml(): string {
       tg.showAlert("Xatolik: " + e.message);
     }
   }
+
+  document.getElementById("openBusinessSettings").addEventListener("click", () => {
+    try {
+      if (tg.openTelegramLink) {
+        tg.openTelegramLink("tg://settings/business");
+      } else {
+        window.location.href = "tg://settings/business";
+      }
+    } catch (e) {
+      window.location.href = "tg://settings/business";
+    }
+  });
 
   load();
 </script>
