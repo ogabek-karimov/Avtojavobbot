@@ -5,6 +5,7 @@ export interface Env {
   ANTHROPIC_API_KEY: string;
   TELEGRAM_WEBHOOK_SECRET: string;
   ADMIN_IDS: string;
+  OWNER_ID: string;
   AI_PROVIDER: string;
   WORKERS_AI_MODEL: string;
   CLAUDE_MODEL: string;

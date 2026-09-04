@@ -10,14 +10,17 @@ import {
   getBusinessConnection,
   getChatSettings,
   getFaq,
+  getOwner,
   getStats,
   isAdmin,
+  isOwner,
   matchFaq,
   recordAutoReplyInteraction,
   removeAdmin,
   removeFaqEntry,
   setBusinessConnection,
   setChatSettings,
+  transferOwnership,
 } from "./store";
 import type {
   ChatSettings,
@@ -62,9 +65,10 @@ const HELP_TEXT = `/panel - boshqaruv panelini ochish (tugmalar bilan, faqat adm
 /resetprompt - ko'rsatmani standart holatga qaytarish (faqat adminlar)
 /status - shu chatning joriy holatini ko'rish
 /myid - o'zingizning Telegram ID raqamingizni bilish
-/addadmin <ID> - boshqa foydalanuvchini admin qilish (faqat adminlar)
-/removeadmin <ID> - adminlikdan olib tashlash (faqat adminlar)
-/listadmins - joriy adminlar ro'yxati (faqat adminlar)`;
+/addadmin <ID> - boshqa foydalanuvchini kichik admin qilish (faqat asosiy admin)
+/removeadmin <ID> - adminlikdan olib tashlash (faqat asosiy admin)
+/listadmins - joriy adminlar ro'yxati (👑 - asosiy admin)
+/transferownership <ID> - asosiy adminlik huquqini boshqa adminga o'tkazish (faqat asosiy admin)`;
 
 function panelText(settings: ChatSettings, env: Env): string {
   const state = settings.autoreply ? "🟢 yoqilgan" : "🔴 o'chirilgan";
@@ -186,13 +190,14 @@ async function authenticateApp(
 }
 
 async function buildAppState(env: Env, chatId: number) {
-  const [settings, admins, faq, stats] = await Promise.all([
+  const [settings, admins, ownerId, faq, stats] = await Promise.all([
     getChatSettings(env, chatId),
     getAdmins(env),
+    getOwner(env),
     getFaq(env, chatId),
     getStats(env),
   ]);
-  return { settings, admins, faq, stats, defaultPrompt: env.DEFAULT_SYSTEM_PROMPT };
+  return { settings, admins, ownerId, faq, stats, defaultPrompt: env.DEFAULT_SYSTEM_PROMPT };
 }
 
 async function handleApiState(request: Request, env: Env): Promise<Response> {
@@ -234,6 +239,7 @@ async function handleApiAction(request: Request, env: Env): Promise<Response> {
       await clearHistory(env, userId);
       break;
     case "add_admin": {
+      if (!(await isOwner(env, userId))) return new Response("Bu amal faqat asosiy admin uchun.", { status: 403 });
       const targetId = parseInt(value, 10);
       if (Number.isNaN(targetId)) return new Response("Noto'g'ri ID.", { status: 400 });
       const added = await addAdmin(env, targetId);
@@ -241,10 +247,21 @@ async function handleApiAction(request: Request, env: Env): Promise<Response> {
       break;
     }
     case "remove_admin": {
+      if (!(await isOwner(env, userId))) return new Response("Bu amal faqat asosiy admin uchun.", { status: 403 });
       const targetId = parseInt(value, 10);
       if (Number.isNaN(targetId)) return new Response("Noto'g'ri ID.", { status: 400 });
       const removed = await removeAdmin(env, targetId);
       if (removed) await syncAdminMenuButton(telegramApi(env.TELEGRAM_BOT_TOKEN), env, targetId, false);
+      break;
+    }
+    case "transfer_ownership": {
+      if (!(await isOwner(env, userId))) return new Response("Bu amal faqat asosiy admin uchun.", { status: 403 });
+      const targetId = parseInt(value, 10);
+      if (Number.isNaN(targetId)) return new Response("Noto'g'ri ID.", { status: 400 });
+      const transferred = await transferOwnership(env, targetId);
+      if (!transferred) {
+        return new Response("Bu ID hali admin emas - avval uni admin qiling.", { status: 400 });
+      }
       break;
     }
     case "add_faq": {
@@ -424,8 +441,11 @@ async function handleCallbackQuery(cq: TelegramCallbackQuery, env: Env): Promise
       break;
 
     case "listadmins": {
-      const admins = await getAdmins(env);
-      const list = admins.length > 0 ? admins.join(", ") : "yo'q";
+      const [admins, ownerId] = await Promise.all([getAdmins(env), getOwner(env)]);
+      const list =
+        admins.length > 0
+          ? admins.map((id) => (id === ownerId ? `👑${id}` : `${id}`)).join(", ")
+          : "yo'q";
       await tg.answerCallbackQuery(cq.id, `Adminlar: ${list}`, true);
       return; // panel matni o'zgarmadi, qayta chizish shart emas
     }
@@ -479,6 +499,12 @@ async function handleCommand(
       "Bu buyruq faqat adminlar uchun. O'z ID raqamingizni bilish uchun /myid yozing.",
       messageId,
     );
+    return false;
+  };
+
+  const requireOwner = async (): Promise<boolean> => {
+    if (await isOwner(env, userId)) return true;
+    await tg.sendMessage(chatId, "Bu buyruq faqat asosiy admin (egasi) uchun.", messageId);
     return false;
   };
 
@@ -583,7 +609,7 @@ async function handleCommand(
     }
 
     case "/addadmin": {
-      if (!(await requireAdmin())) return;
+      if (!(await requireOwner())) return;
       const targetId = parseInt(args[0], 10);
       if (args.length !== 1 || Number.isNaN(targetId)) {
         await tg.sendMessage(chatId, "Foydalanish: /addadmin <Telegram ID>");
@@ -591,12 +617,15 @@ async function handleCommand(
       }
       const added = await addAdmin(env, targetId);
       if (added) await syncAdminMenuButton(tg, env, targetId, true);
-      await tg.sendMessage(chatId, added ? `${targetId} endi admin.` : `${targetId} allaqachon admin edi.`);
+      await tg.sendMessage(
+        chatId,
+        added ? `${targetId} endi kichik admin.` : `${targetId} allaqachon admin edi.`,
+      );
       return;
     }
 
     case "/removeadmin": {
-      if (!(await requireAdmin())) return;
+      if (!(await requireOwner())) return;
       const targetId = parseInt(args[0], 10);
       if (args.length !== 1 || Number.isNaN(targetId)) {
         await tg.sendMessage(chatId, "Foydalanish: /removeadmin <Telegram ID>");
@@ -608,16 +637,36 @@ async function handleCommand(
         chatId,
         removed
           ? `${targetId} adminlikdan olib tashlandi.`
-          : "Bajarilmadi: bu ID admin emas, yoki oxirgi (yagona) adminni olib tashlab bo'lmaydi.",
+          : "Bajarilmadi: bu ID admin emas, asosiy admin (egasi)ni to'g'ridan-to'g'ri o'chirib bo'lmaydi, yoki oxirgi (yagona) adminni olib tashlab bo'lmaydi.",
       );
       return;
     }
 
     case "/listadmins": {
       if (!(await requireAdmin())) return;
-      const admins = await getAdmins(env);
-      const listText = admins.length > 0 ? admins.join("\n") : "Adminlar yo'q.";
+      const [admins, ownerId] = await Promise.all([getAdmins(env), getOwner(env)]);
+      const listText =
+        admins.length > 0
+          ? admins.map((id) => (id === ownerId ? `👑 ${id} (asosiy admin)` : `${id}`)).join("\n")
+          : "Adminlar yo'q.";
       await tg.sendMessage(chatId, `Adminlar:\n${listText}`);
+      return;
+    }
+
+    case "/transferownership": {
+      if (!(await requireOwner())) return;
+      const targetId = parseInt(args[0], 10);
+      if (args.length !== 1 || Number.isNaN(targetId)) {
+        await tg.sendMessage(chatId, "Foydalanish: /transferownership <Telegram ID (u avvaldan admin bo'lishi kerak)>");
+        return;
+      }
+      const transferred = await transferOwnership(env, targetId);
+      await tg.sendMessage(
+        chatId,
+        transferred
+          ? `👑 Asosiy adminlik huquqi ${targetId}ga o'tkazildi.`
+          : "Bajarilmadi: bu ID hali admin emas. Avval /addadmin bilan admin qiling, keyin egalikni o'tkazing.",
+      );
       return;
     }
 

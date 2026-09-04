@@ -136,11 +136,20 @@ export function renderAppHtml(): string {
 
     <div class="card">
       <div class="label">Adminlar</div>
-      <div id="adminList"></div>
-      <div class="btn-row">
-        <input type="text" id="newAdminId" placeholder="Telegram ID" inputmode="numeric" />
-        <button id="addAdminBtn">Qo'shish</button>
+      <div class="hint">👑 - asosiy admin (egasi). Qolganlari - kichik adminlar.</div>
+      <div id="adminList" style="margin-top:8px"></div>
+      <div id="adminManageArea">
+        <div class="btn-row">
+          <input type="text" id="newAdminId" placeholder="Telegram ID" inputmode="numeric" />
+          <button id="addAdminBtn">Qo'shish</button>
+        </div>
+        <div class="hint" style="margin-top:10px">Asosiy adminlik huquqini o'tkazish (avval yuqoridagi ID admin bo'lishi kerak):</div>
+        <div class="btn-row">
+          <input type="text" id="transferOwnerId" placeholder="Telegram ID" inputmode="numeric" />
+          <button class="danger" id="transferOwnerBtn">O'tkazish</button>
+        </div>
       </div>
+      <div id="adminManageHint" class="hint" hidden>Adminlarni boshqarish va egalikni o'tkazish faqat asosiy admin uchun.</div>
     </div>
 
     <div class="card">
@@ -195,7 +204,7 @@ export function renderAppHtml(): string {
     return res.json();
   }
 
-  function renderAdmins(admins) {
+  function renderAdmins(admins, ownerId, isOwnerMe) {
     adminListEl.innerHTML = "";
     if (admins.length === 0) {
       adminListEl.innerHTML = '<div class="hint">Adminlar yo\\'q</div>';
@@ -205,15 +214,17 @@ export function renderAppHtml(): string {
       const row = document.createElement("div");
       row.className = "admin-item";
       const span = document.createElement("span");
-      span.textContent = id;
-      const btn = document.createElement("button");
-      btn.className = "danger";
-      btn.textContent = "O'chirish";
-      btn.style.padding = "6px 10px";
-      btn.style.fontSize = "12px";
-      btn.onclick = () => removeAdmin(id);
+      span.textContent = (id === ownerId ? "👑 " : "") + id + (id === ownerId ? " (asosiy admin)" : "");
       row.appendChild(span);
-      row.appendChild(btn);
+      if (isOwnerMe && id !== ownerId) {
+        const btn = document.createElement("button");
+        btn.className = "danger";
+        btn.textContent = "O'chirish";
+        btn.style.padding = "6px 10px";
+        btn.style.fontSize = "12px";
+        btn.onclick = () => removeAdmin(id);
+        row.appendChild(btn);
+      }
       adminListEl.appendChild(row);
     }
   }
@@ -256,7 +267,11 @@ export function renderAppHtml(): string {
     currentState = state;
     autoreplyToggle.checked = state.settings.autoreply;
     promptInput.value = state.settings.prompt ?? state.defaultPrompt;
-    renderAdmins(state.admins);
+    const myId = tg.initDataUnsafe && tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : null;
+    const isOwnerMe = myId === state.ownerId;
+    renderAdmins(state.admins, state.ownerId, isOwnerMe);
+    document.getElementById("adminManageArea").hidden = !isOwnerMe;
+    document.getElementById("adminManageHint").hidden = isOwnerMe;
     renderFaq(state.faq);
     document.getElementById("statRepliedCount").textContent = state.stats.repliedCount;
     document.getElementById("statRespondedCount").textContent = state.stats.respondedCount;
@@ -316,6 +331,25 @@ export function renderAppHtml(): string {
     } catch (e) {
       tg.showAlert("Xatolik: " + e.message);
     }
+  });
+
+  document.getElementById("transferOwnerBtn").addEventListener("click", async () => {
+    const input = document.getElementById("transferOwnerId");
+    const id = input.value.trim();
+    if (!id) return;
+    tg.showConfirm(
+      "Asosiy adminlik huquqini " + id + "ga o'tkazmoqchimisiz? Siz kichik adminga aylanasiz.",
+      async (ok) => {
+        if (!ok) return;
+        try {
+          const state = await api("/api/action", { action: "transfer_ownership", value: id });
+          render(state);
+          input.value = "";
+        } catch (e) {
+          tg.showAlert("Xatolik: " + e.message);
+        }
+      },
+    );
   });
 
   async function removeAdmin(id) {

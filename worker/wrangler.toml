@@ -11,6 +11,7 @@ binding = "AI"
 
 [vars]
 ADMIN_IDS = "123456789"
+OWNER_ID = "123456789"
 # "workers-ai" - bepul, Cloudflare'ning o'z modeli (Anthropic kredit kerak emas).
 # "anthropic" ga o'zgartirsangiz - Claude ishlatiladi (ANTHROPIC_API_KEY'da kredit bo'lishi kerak).
 AI_PROVIDER = "workers-ai"
