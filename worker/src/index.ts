@@ -1,5 +1,5 @@
 import { validateInitData } from "./auth";
-import { getReply } from "./claude";
+import { getReply } from "./reply";
 import { telegramApi, type InlineKeyboard } from "./telegram";
 import {
   addAdmin,
@@ -18,7 +18,12 @@ import {
   setChatSettings,
 } from "./store";
 import type { ChatSettings, Env, TelegramCallbackQuery, TelegramUpdate } from "./types";
+import { containsRiskyContent } from "./safety";
 import { renderAppHtml } from "./webapp";
+
+const RISKY_CONTENT_REPLY =
+  "Bu xabar avtomatik javob berilmaydigan mavzuga tegishli bo'lishi mumkin (pul/kod so'rash, noqonuniy yoki xavfli mazmun). " +
+  "Iltimos, kuting - bot egasi sizga shaxsan javob beradi.";
 
 const HELP_TEXT = `/panel - boshqaruv panelini ochish (tugmalar bilan, faqat adminlar)
 /stats - hisobot: nechta userga javob berdi, nechtasi javob qaytardi (faqat adminlar)
@@ -62,6 +67,28 @@ function panelKeyboardWithApp(settings: ChatSettings, appUrl: string): InlineKey
   const kb = panelKeyboard(settings);
   kb.inline_keyboard.unshift([{ text: "🖥 To'liq ilovani ochish", web_app: { url: appUrl } }]);
   return kb;
+}
+
+/**
+ * Keeps the persistent Menu (☰) button in sync with admin status: only admins get the
+ * button that opens the Mini App - everyone else falls back to the plain command list.
+ * Assumes chat_id == user_id, true for the private 1:1 chats this bot is used in.
+ */
+async function syncAdminMenuButton(
+  tg: ReturnType<typeof telegramApi>,
+  env: Env,
+  targetChatId: number,
+  isNowAdmin: boolean,
+): Promise<void> {
+  if (isNowAdmin) {
+    await tg.setChatMenuButton(targetChatId, {
+      type: "web_app",
+      text: "Menu",
+      web_app: { url: `${env.APP_BASE_URL}/app` },
+    });
+  } else {
+    await tg.setChatMenuButton(targetChatId, { type: "default" });
+  }
 }
 
 export default {
@@ -177,13 +204,15 @@ async function handleApiAction(request: Request, env: Env): Promise<Response> {
     case "add_admin": {
       const targetId = parseInt(value, 10);
       if (Number.isNaN(targetId)) return new Response("Noto'g'ri ID.", { status: 400 });
-      await addAdmin(env, targetId);
+      const added = await addAdmin(env, targetId);
+      if (added) await syncAdminMenuButton(telegramApi(env.TELEGRAM_BOT_TOKEN), env, targetId, true);
       break;
     }
     case "remove_admin": {
       const targetId = parseInt(value, 10);
       if (Number.isNaN(targetId)) return new Response("Noto'g'ri ID.", { status: 400 });
-      await removeAdmin(env, targetId);
+      const removed = await removeAdmin(env, targetId);
+      if (removed) await syncAdminMenuButton(telegramApi(env.TELEGRAM_BOT_TOKEN), env, targetId, false);
       break;
     }
     case "add_faq": {
@@ -232,6 +261,11 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
   if (!settings.autoreply) return;
 
   await recordAutoReplyInteraction(env, userId);
+
+  if (containsRiskyContent(text)) {
+    await tg.sendMessage(chatId, RISKY_CONTENT_REPLY);
+    return;
+  }
 
   const faq = await getFaq(env, chatId);
   const faqReply = matchFaq(faq, text);
@@ -453,6 +487,7 @@ async function handleCommand(
         return;
       }
       const added = await addAdmin(env, targetId);
+      if (added) await syncAdminMenuButton(tg, env, targetId, true);
       await tg.sendMessage(chatId, added ? `${targetId} endi admin.` : `${targetId} allaqachon admin edi.`);
       return;
     }
@@ -465,6 +500,7 @@ async function handleCommand(
         return;
       }
       const removed = await removeAdmin(env, targetId);
+      if (removed) await syncAdminMenuButton(tg, env, targetId, false);
       await tg.sendMessage(
         chatId,
         removed

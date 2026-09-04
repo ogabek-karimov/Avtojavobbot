@@ -67,6 +67,25 @@ export function telegramApi(token: string) {
       });
     },
 
+    /**
+     * Sets the persistent menu button (☰, next to the message box) for one specific chat.
+     * Pass `{ type: "default" }` to remove a custom button (falls back to the bot's own
+     * command list); pass a web_app button to open the Mini App from that chat only.
+     */
+    async setChatMenuButton(
+      chatId: number,
+      menuButton: { type: "default" } | { type: "web_app"; text: string; web_app: { url: string } },
+    ): Promise<void> {
+      const res = await fetch(`${base}/setChatMenuButton`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, menu_button: menuButton }),
+      });
+      if (!res.ok) {
+        console.error("setChatMenuButton failed", res.status, await res.text());
+      }
+    },
+
     async setWebhook(url: string, secretToken: string): Promise<unknown> {
       const res = await fetch(`${base}/setWebhook`, {
         method: "POST",

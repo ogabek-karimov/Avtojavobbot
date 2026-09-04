@@ -1,9 +1,12 @@
 export interface Env {
   BOT_KV: KVNamespace;
+  AI: Ai;
   TELEGRAM_BOT_TOKEN: string;
   ANTHROPIC_API_KEY: string;
   TELEGRAM_WEBHOOK_SECRET: string;
   ADMIN_IDS: string;
+  AI_PROVIDER: string;
+  WORKERS_AI_MODEL: string;
   CLAUDE_MODEL: string;
   CLAUDE_MAX_TOKENS: string;
   CLAUDE_EFFORT: string;

@@ -6,8 +6,15 @@ compatibility_date = "2026-09-01"
 binding = "BOT_KV"
 id = "2d5a17bfa63b45beb593c9079736eadb"
 
+[ai]
+binding = "AI"
+
 [vars]
 ADMIN_IDS = "123456789"
+# "workers-ai" - bepul, Cloudflare'ning o'z modeli (Anthropic kredit kerak emas).
+# "anthropic" ga o'zgartirsangiz - Claude ishlatiladi (ANTHROPIC_API_KEY'da kredit bo'lishi kerak).
+AI_PROVIDER = "workers-ai"
+WORKERS_AI_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast"
 CLAUDE_MODEL = "claude-haiku-4-5"
 CLAUDE_MAX_TOKENS = "1024"
 CLAUDE_EFFORT = "low"
