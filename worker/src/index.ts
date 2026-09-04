@@ -30,12 +30,21 @@ import type {
   TelegramMessage,
   TelegramUpdate,
 } from "./types";
-import { containsRiskyContent, isRiskyViaAI } from "./safety";
+import { classifyRisk } from "./safety";
 import { renderAppHtml } from "./webapp";
 
 const RISKY_CONTENT_REPLY =
   "Bu xabar avtomatik javob berilmaydigan mavzuga tegishli. " +
   "Iltimos, kuting - bot egasi sizga shaxsan javob beradi.";
+
+const PROFANITY_REPLY =
+  "Haqorat qilish⚠️\n\n" +
+  "To'g'ridan-to'g'ri Jinoiy javobgarlik (Jinoyat kodeksi, 140-modda, 2-qism)\n\n" +
+  "Agar shaxs Telegram orqali (guruhlarda, kanallarda yoki shaxsiy yozishmada) birovni beodob so'zlar bilan " +
+  "tahqirlasa, qonunga ko'ra ma'muriy jazo kutilmasdan, to'g'ridan-to'g'ri jinoiy ish qo'zg'atiladi.\n\n" +
+  "Jarima: BHMning 200 baravaridan 400 baravarigacha (bugungi kunda taxminan 75 mln so'mdan 150 mln so'mgacha).\n" +
+  "Majburiy ishlar: 240 soatdan 300 soatgacha majburiy jamoat ishlari.\n" +
+  "Axloq tuzatish ishlari: 1 yildan 2 yilgacha ish haqining muayyan qismini davlat foydasiga ushlab qolish jazosi.";
 
 /**
  * Prepended to every AI-generated auto-reply (regular chat and Telegram Business alike).
@@ -54,6 +63,10 @@ function guardrailPreamble(): string {
   return (
     "Siz odam emassiz - siz sun'iy intellekt (AI) agentisiz. Bu allaqachon foydalanuvchiga " +
     "ochiq aytilgan (javobingiz oldida), shuning uchun buni o'zingiz alohida takrorlashingiz shart emas.\n\n" +
+    "Javobingizni FAQAT sof, adabiy, grammatik jihatdan to'g'ri o'zbek tilida yozing. Gaplarni tabiiy " +
+    "va ravon tuzing, so'zlarni to'g'ri qo'shimchalar bilan bog'lang (masalan ega-kesim, egalik va kelishik " +
+    "qo'shimchalarini to'g'ri qo'llang), rus yoki ingliz tilidan so'zma-so'z tarjima qilingandek noqulay " +
+    "jumlalar yozmang. Javobni yuborishdan oldin grammatikasini o'zingiz tekshirib chiqing.\n\n" +
     "Quyidagilarni HECH QACHON qilmang, hatto qat'iy so'ralsa yoki suhbat shunga undasa ham:\n" +
     "- Uchrashuvga rozi bo'lmang yoki uni tasdiqlaydigan gap yozmang (\"keldim\", \"tayyorman\", \"u yerda ko'rishamiz\" kabi).\n" +
     "- Telefon raqamni bermang.\n" +
@@ -332,7 +345,12 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
 
   await recordAutoReplyInteraction(env, userId);
 
-  if (containsRiskyContent(text) || (await isRiskyViaAI(env, text))) {
+  const riskCategory = await classifyRisk(env, text);
+  if (riskCategory === "profanity") {
+    await tg.sendMessage(chatId, PROFANITY_REPLY);
+    return;
+  }
+  if (riskCategory === "other") {
     await tg.sendMessage(chatId, RISKY_CONTENT_REPLY);
     return;
   }
@@ -393,7 +411,12 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
 
   await recordAutoReplyInteraction(env, message.from.id);
 
-  if (containsRiskyContent(text) || (await isRiskyViaAI(env, text))) {
+  const riskCategory = await classifyRisk(env, text);
+  if (riskCategory === "profanity") {
+    await tg.sendMessage(customerChatId, PROFANITY_REPLY, undefined, undefined, connectionId);
+    return;
+  }
+  if (riskCategory === "other") {
     await tg.sendMessage(customerChatId, RISKY_CONTENT_REPLY, undefined, undefined, connectionId);
     return;
   }
