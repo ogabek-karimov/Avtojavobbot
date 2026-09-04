@@ -75,7 +75,7 @@ doimiy ishlab turgani kifoya.
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | ha | @BotFather'dan olingan token |
 | `ANTHROPIC_API_KEY` | ha | console.anthropic.com dan olingan kalit |
-| `ADMIN_IDS` | tavsiya etiladi | boshlang'ich admin(lar), vergul bilan (masalan `123456789,123456`) |
+| `ADMIN_IDS` | tavsiya etiladi | boshlang'ich admin(lar), vergul bilan (masalan `123456789,987654321`) |
 | `CLAUDE_MODEL` | yo'q | standart: `claude-opus-5` (eng sifatli, lekin qimmatroq — yuqori hajmda `claude-sonnet-5` yoki `claude-haiku-4-5`ga o'tish arzonroq bo'ladi) |
 | `CLAUDE_MAX_TOKENS` | yo'q | standart: `1024` |
 | `CLAUDE_EFFORT` | yo'q | standart: `low` (tezkor, arzon suhbat uchun) |

@@ -15,7 +15,7 @@ def _get_int(name: str) -> int | None:
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
-# Comma-separated Telegram user ids that are admins on first run (e.g. "123456789,123456").
+# Comma-separated Telegram user ids that are admins on first run (e.g. "123456789,987654321").
 # Admins can change bot settings (/autoreply_on, /setprompt, ...) and add/remove other
 # admins with /addadmin, /removeadmin. This only seeds the list on first run - after that
 # the live admin list lives in storage (data/settings.json) and survives restarts.
