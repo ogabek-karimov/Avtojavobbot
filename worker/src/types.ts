@@ -41,6 +41,12 @@ export interface TrustedEntry {
   label: string;
 }
 
+export interface ServiceIntake {
+  enabled: boolean;
+  description: string;
+  reply: string;
+}
+
 // Minimal Telegram types - just the fields this bot actually reads.
 export interface TelegramUser {
   id: number;

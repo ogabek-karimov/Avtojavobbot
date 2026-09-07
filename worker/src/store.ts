@@ -1,4 +1,4 @@
-import type { ChatSettings, Env, FaqEntry, HistoryMessage, TrustedEntry, VipEntry } from "./types";
+import type { ChatSettings, Env, FaqEntry, HistoryMessage, ServiceIntake, TrustedEntry, VipEntry } from "./types";
 
 const ADMINS_KEY = "admins";
 const OWNER_KEY = "owner";
@@ -27,6 +27,10 @@ function chatTrustedKey(chatId: number): string {
 
 function chatTrustedEnabledKey(chatId: number): string {
   return `chat:${chatId}:trusted_enabled`;
+}
+
+function chatIntakeKey(chatId: number): string {
+  return `chat:${chatId}:intake`;
 }
 
 function businessConnectionKey(connectionId: string): string {
@@ -231,6 +235,18 @@ export async function isTrustedBypassEnabled(env: Env, chatId: number): Promise<
 
 export async function setTrustedBypassEnabled(env: Env, chatId: number, enabled: boolean): Promise<void> {
   await env.BOT_KV.put(chatTrustedEnabledKey(chatId), String(enabled));
+}
+
+const DEFAULT_INTAKE: ServiceIntake = { enabled: false, description: "", reply: "" };
+
+export async function getServiceIntake(env: Env, chatId: number): Promise<ServiceIntake> {
+  const raw = await env.BOT_KV.get(chatIntakeKey(chatId));
+  if (raw === null) return DEFAULT_INTAKE;
+  return { ...DEFAULT_INTAKE, ...(JSON.parse(raw) as Partial<ServiceIntake>) };
+}
+
+export async function setServiceIntake(env: Env, chatId: number, intake: ServiceIntake): Promise<void> {
+  await env.BOT_KV.put(chatIntakeKey(chatId), JSON.stringify(intake));
 }
 
 async function getIdSet(env: Env, key: string): Promise<Set<number>> {

@@ -165,6 +165,26 @@ export function renderAppHtml(): string {
     </div>
 
     <div class="card">
+      <div class="row">
+        <div>
+          <div class="label">🎯 Xizmat so'rovini aniqlash</div>
+          <div class="hint">Xabar ma'nosi shu xizmatga to'g'ri kelsa (so'zlar aynan mos kelishi shart emas), AI o'rniga tayyor javob yuboriladi</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="intakeToggle" />
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="hint" style="margin-top:10px">Xizmat tavsifi:</div>
+      <textarea id="intakeDescription" placeholder="Masalan: Windows/Office o'rnatish yoki faollashtirish, kompyuter/printer nosozligi bo'yicha yordam so'rash" style="min-height:70px"></textarea>
+      <div class="hint" style="margin-top:10px">Javob matni ({ism} = jonli ismingiz bilan almashadi):</div>
+      <textarea id="intakeReply" placeholder="🤖 Men {ism}ning AI agentiman. {ism} yaqin orada siz bilan bog'lanadi." style="min-height:60px"></textarea>
+      <div class="btn-row">
+        <button id="saveIntakeBtn">Saqlash</button>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="label">Adminlar</div>
       <div class="hint">👑 - asosiy admin (egasi). Qolganlari - kichik adminlar.</div>
       <div id="adminList" style="margin-top:8px"></div>
@@ -354,6 +374,9 @@ export function renderAppHtml(): string {
     renderVip(state.vip);
     renderTrusted(state.trusted);
     document.getElementById("trustedToggle").checked = state.trustedEnabled;
+    document.getElementById("intakeToggle").checked = state.intake.enabled;
+    document.getElementById("intakeDescription").value = state.intake.description;
+    document.getElementById("intakeReply").value = state.intake.reply;
     document.getElementById("statRepliedCount").textContent = state.stats.repliedCount;
     document.getElementById("statRespondedCount").textContent = state.stats.respondedCount;
   }
@@ -536,6 +559,21 @@ export function renderAppHtml(): string {
       tg.showAlert("Xatolik: " + e.message);
     }
   }
+
+  document.getElementById("saveIntakeBtn").addEventListener("click", async () => {
+    try {
+      const state = await api("/api/action", {
+        action: "set_intake",
+        enabled: document.getElementById("intakeToggle").checked,
+        description: document.getElementById("intakeDescription").value,
+        reply: document.getElementById("intakeReply").value,
+      });
+      render(state);
+      tg.showAlert("Saqlandi.");
+    } catch (e) {
+      tg.showAlert("Xatolik: " + e.message);
+    }
+  });
 
   document.getElementById("openBusinessSettings").addEventListener("click", () => {
     try {

@@ -1,6 +1,7 @@
 import { validateInitData } from "./auth";
 import { getReply } from "./reply";
 import { telegramApi, type InlineKeyboard } from "./telegram";
+import { classifyServiceRequest } from "./intake";
 import {
   addAdmin,
   addFaqEntry,
@@ -15,6 +16,7 @@ import {
   getChatSettings,
   getFaq,
   getOwner,
+  getServiceIntake,
   getStats,
   getTrustedList,
   getVipList,
@@ -29,6 +31,7 @@ import {
   removeVipEntry,
   setBusinessConnection,
   setChatSettings,
+  setServiceIntake,
   setTrustedBypassEnabled,
   transferOwnership,
 } from "./store";
@@ -108,9 +111,19 @@ function conversationNotification(from: string, text: string, aiReply: string): 
   return `💬 ${from} yozdi:\n${text}\n\n🤖 AI javobi:\n${aiReply}`;
 }
 
+/** A potential customer/lead was detected by the service-intake classifier - flag it for follow-up. */
+function intakeNotification(from: string, text: string): string {
+  return `🎯 Yangi xizmat so'rovi!\n${from}\n\n${text}`;
+}
+
 function senderLabel(user: TelegramUser): string {
   const name = user.username ? `${user.first_name} (@${user.username})` : user.first_name;
   return `${name} [ID: ${user.id}]`;
+}
+
+/** Lets FAQ/service-intake replies embed {ism} and always get the owner's current live name. */
+function substitutePlaceholders(text: string, ownerName: string): string {
+  return text.replace(/\{ism\}/gi, ownerName);
 }
 
 const HELP_TEXT = `/panel - boshqaruv panelini ochish (tugmalar bilan, faqat adminlar)
@@ -251,13 +264,14 @@ async function authenticateApp(
 /** Settings/FAQ/VIP are global (bot-owner-scoped) - any admin viewing the Mini App sees/edits the same shared config. */
 async function buildAppState(env: Env) {
   const ownerId = await getOwner(env);
-  const [settings, admins, faq, vip, trusted, trustedEnabled, stats] = await Promise.all([
+  const [settings, admins, faq, vip, trusted, trustedEnabled, intake, stats] = await Promise.all([
     getChatSettings(env, ownerId),
     getAdmins(env),
     getFaq(env, ownerId),
     getVipList(env, ownerId),
     getTrustedList(env, ownerId),
     isTrustedBypassEnabled(env, ownerId),
+    getServiceIntake(env, ownerId),
     getStats(env),
   ]);
   return {
@@ -268,6 +282,7 @@ async function buildAppState(env: Env) {
     vip,
     trusted,
     trustedEnabled,
+    intake,
     stats,
     defaultPrompt: env.DEFAULT_SYSTEM_PROMPT,
   };
@@ -383,6 +398,13 @@ async function handleApiAction(request: Request, env: Env): Promise<Response> {
     case "trusted_bypass_off":
       await setTrustedBypassEnabled(env, ownerId, false);
       break;
+    case "set_intake": {
+      const description = typeof body.description === "string" ? body.description.trim() : "";
+      const intakeReply = typeof body.reply === "string" ? body.reply.trim() : "";
+      const enabled = body.enabled === true;
+      await setServiceIntake(env, ownerId, { enabled, description, reply: intakeReply });
+      break;
+    }
     default:
       return new Response("Noma'lum amal.", { status: 400 });
   }
@@ -431,9 +453,10 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
 
   await recordAutoReplyInteraction(env, userId);
 
+  const ownerName = (await tg.getChatFirstName(ownerId)) ?? "Admin";
+
   const vip = findVip(await getVipList(env, ownerId), userId);
   if (vip) {
-    const ownerName = (await tg.getChatFirstName(ownerId)) ?? "Admin";
     await tg.sendMessage(chatId, vipHoldingMessage(ownerName));
     if (!(await isAdmin(env, userId))) {
       await tg.sendMessage(ownerId, vipNotification(vip, senderLabel(message.from), text));
@@ -459,7 +482,16 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
   const faq = await getFaq(env, ownerId);
   const faqReply = matchFaq(faq, text);
   if (faqReply) {
-    await tg.sendMessage(chatId, faqReply);
+    await tg.sendMessage(chatId, substitutePlaceholders(faqReply, ownerName));
+    return;
+  }
+
+  const intake = await getServiceIntake(env, ownerId);
+  if (intake.enabled && intake.description && (await classifyServiceRequest(env, text, intake.description))) {
+    await tg.sendMessage(chatId, substitutePlaceholders(intake.reply, ownerName));
+    if (!(await isAdmin(env, userId))) {
+      await tg.sendMessage(ownerId, intakeNotification(senderLabel(message.from), text));
+    }
     return;
   }
 
@@ -545,7 +577,22 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
   const faq = await getFaq(env, conn.ownerId);
   const faqReply = matchFaq(faq, text);
   if (faqReply) {
-    await tg.sendMessage(customerChatId, faqReply, undefined, undefined, connectionId);
+    await tg.sendMessage(customerChatId, substitutePlaceholders(faqReply, liveOwnerName), undefined, undefined, connectionId);
+    return;
+  }
+
+  const intake = await getServiceIntake(env, conn.ownerId);
+  if (intake.enabled && intake.description && (await classifyServiceRequest(env, text, intake.description))) {
+    await tg.sendMessage(
+      customerChatId,
+      substitutePlaceholders(intake.reply, liveOwnerName),
+      undefined,
+      undefined,
+      connectionId,
+    );
+    if (!(await isAdmin(env, message.from.id))) {
+      await tg.sendMessage(conn.ownerId, intakeNotification(senderLabel(message.from), text));
+    }
     return;
   }
 
