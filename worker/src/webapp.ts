@@ -146,6 +146,25 @@ export function renderAppHtml(): string {
     </div>
 
     <div class="card">
+      <div class="row">
+        <div>
+          <div class="label">🔓 Ishonchli ro'yxat</div>
+          <div class="hint">Bu ro'yxatdagi odam bilan AI hech qanday mavzu cheklovisiz (din va h.k.) erkin gaplashadi</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="trustedToggle" />
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div id="trustedList" style="margin-top:8px"></div>
+      <div class="btn-row">
+        <input type="text" id="trustedId" placeholder="Telegram ID" inputmode="numeric" />
+        <input type="text" id="trustedLabel" placeholder="Nom (masalan: Jiyanim Ali)" />
+        <button id="addTrustedBtn">Qo'shish</button>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="label">Adminlar</div>
       <div class="hint">👑 - asosiy admin (egasi). Qolganlari - kichik adminlar.</div>
       <div id="adminList" style="margin-top:8px"></div>
@@ -292,6 +311,30 @@ export function renderAppHtml(): string {
     });
   }
 
+  function renderTrusted(trusted) {
+    const trustedListEl = document.getElementById("trustedList");
+    trustedListEl.innerHTML = "";
+    if (trusted.length === 0) {
+      trustedListEl.innerHTML = '<div class="hint" style="padding:6px 0">Hali qo\\'shilmagan</div>';
+      return;
+    }
+    trusted.forEach((entry, index) => {
+      const row = document.createElement("div");
+      row.className = "admin-item";
+      const span = document.createElement("span");
+      span.textContent = entry.label + " - " + entry.id;
+      const btn = document.createElement("button");
+      btn.className = "danger";
+      btn.textContent = "O'chirish";
+      btn.style.padding = "6px 10px";
+      btn.style.fontSize = "12px";
+      btn.onclick = () => removeTrusted(index);
+      row.appendChild(span);
+      row.appendChild(btn);
+      trustedListEl.appendChild(row);
+    });
+  }
+
   function escapeHtml(s) {
     const d = document.createElement("div");
     d.textContent = s;
@@ -309,6 +352,8 @@ export function renderAppHtml(): string {
     document.getElementById("adminManageHint").hidden = isOwnerMe;
     renderFaq(state.faq);
     renderVip(state.vip);
+    renderTrusted(state.trusted);
+    document.getElementById("trustedToggle").checked = state.trustedEnabled;
     document.getElementById("statRepliedCount").textContent = state.stats.repliedCount;
     document.getElementById("statRespondedCount").textContent = state.stats.respondedCount;
   }
@@ -447,6 +492,45 @@ export function renderAppHtml(): string {
   async function removeVip(index) {
     try {
       const state = await api("/api/action", { action: "remove_vip", index });
+      render(state);
+    } catch (e) {
+      tg.showAlert("Xatolik: " + e.message);
+    }
+  }
+
+  document.getElementById("trustedToggle").addEventListener("change", async () => {
+    try {
+      const state = await api("/api/action", {
+        action: document.getElementById("trustedToggle").checked ? "trusted_bypass_on" : "trusted_bypass_off",
+      });
+      render(state);
+    } catch (e) {
+      tg.showAlert("Xatolik: " + e.message);
+    }
+  });
+
+  document.getElementById("addTrustedBtn").addEventListener("click", async () => {
+    const idInput = document.getElementById("trustedId");
+    const labelInput = document.getElementById("trustedLabel");
+    const id = idInput.value.trim();
+    const label = labelInput.value.trim();
+    if (!id || !label) {
+      tg.showAlert("ID va nomni kiriting.");
+      return;
+    }
+    try {
+      const state = await api("/api/action", { action: "add_trusted", id, label });
+      render(state);
+      idInput.value = "";
+      labelInput.value = "";
+    } catch (e) {
+      tg.showAlert("Xatolik: " + e.message);
+    }
+  });
+
+  async function removeTrusted(index) {
+    try {
+      const state = await api("/api/action", { action: "remove_trusted", index });
       render(state);
     } catch (e) {
       tg.showAlert("Xatolik: " + e.message);

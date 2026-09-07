@@ -36,6 +36,11 @@ export interface VipEntry {
   role: string;
 }
 
+export interface TrustedEntry {
+  id: number;
+  label: string;
+}
+
 // Minimal Telegram types - just the fields this bot actually reads.
 export interface TelegramUser {
   id: number;

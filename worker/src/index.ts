@@ -4,9 +4,11 @@ import { telegramApi, type InlineKeyboard } from "./telegram";
 import {
   addAdmin,
   addFaqEntry,
+  addTrustedEntry,
   addVipEntry,
   appendHistory,
   clearHistory,
+  findTrusted,
   findVip,
   getAdmins,
   getBusinessConnection,
@@ -14,16 +16,20 @@ import {
   getFaq,
   getOwner,
   getStats,
+  getTrustedList,
   getVipList,
   isAdmin,
   isOwner,
+  isTrustedBypassEnabled,
   matchFaq,
   recordAutoReplyInteraction,
   removeAdmin,
   removeFaqEntry,
+  removeTrustedEntry,
   removeVipEntry,
   setBusinessConnection,
   setChatSettings,
+  setTrustedBypassEnabled,
   transferOwnership,
 } from "./store";
 import type {
@@ -245,14 +251,26 @@ async function authenticateApp(
 /** Settings/FAQ/VIP are global (bot-owner-scoped) - any admin viewing the Mini App sees/edits the same shared config. */
 async function buildAppState(env: Env) {
   const ownerId = await getOwner(env);
-  const [settings, admins, faq, vip, stats] = await Promise.all([
+  const [settings, admins, faq, vip, trusted, trustedEnabled, stats] = await Promise.all([
     getChatSettings(env, ownerId),
     getAdmins(env),
     getFaq(env, ownerId),
     getVipList(env, ownerId),
+    getTrustedList(env, ownerId),
+    isTrustedBypassEnabled(env, ownerId),
     getStats(env),
   ]);
-  return { settings, admins, ownerId, faq, vip, stats, defaultPrompt: env.DEFAULT_SYSTEM_PROMPT };
+  return {
+    settings,
+    admins,
+    ownerId,
+    faq,
+    vip,
+    trusted,
+    trustedEnabled,
+    stats,
+    defaultPrompt: env.DEFAULT_SYSTEM_PROMPT,
+  };
 }
 
 async function handleApiState(request: Request, env: Env): Promise<Response> {
@@ -346,6 +364,25 @@ async function handleApiAction(request: Request, env: Env): Promise<Response> {
       await removeVipEntry(env, ownerId, index);
       break;
     }
+    case "add_trusted": {
+      const targetId = parseInt(typeof body.id === "string" ? body.id : value, 10);
+      const label = typeof body.label === "string" ? body.label.trim() : "";
+      if (Number.isNaN(targetId) || !label) return new Response("ID va nom bo'sh bo'lmasin.", { status: 400 });
+      await addTrustedEntry(env, ownerId, { id: targetId, label });
+      break;
+    }
+    case "remove_trusted": {
+      const index = typeof body.index === "number" ? body.index : parseInt(value, 10);
+      if (Number.isNaN(index)) return new Response("Noto'g'ri index.", { status: 400 });
+      await removeTrustedEntry(env, ownerId, index);
+      break;
+    }
+    case "trusted_bypass_on":
+      await setTrustedBypassEnabled(env, ownerId, true);
+      break;
+    case "trusted_bypass_off":
+      await setTrustedBypassEnabled(env, ownerId, false);
+      break;
     default:
       return new Response("Noma'lum amal.", { status: 400 });
   }
@@ -404,14 +441,19 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
     return;
   }
 
-  const riskCategory = await classifyRisk(env, text);
-  if (riskCategory === "profanity") {
-    await tg.sendMessage(chatId, PROFANITY_REPLY);
-    return;
-  }
-  if (riskCategory === "other") {
-    await tg.sendMessage(chatId, RISKY_CONTENT_REPLY);
-    return;
+  const trusted = findTrusted(await getTrustedList(env, ownerId), userId);
+  const trustedActive = trusted !== null && (await isTrustedBypassEnabled(env, ownerId));
+
+  if (!trustedActive) {
+    const riskCategory = await classifyRisk(env, text);
+    if (riskCategory === "profanity") {
+      await tg.sendMessage(chatId, PROFANITY_REPLY);
+      return;
+    }
+    if (riskCategory === "other") {
+      await tg.sendMessage(chatId, RISKY_CONTENT_REPLY);
+      return;
+    }
   }
 
   const faq = await getFaq(env, ownerId);
@@ -485,14 +527,19 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
     return;
   }
 
-  const riskCategory = await classifyRisk(env, text);
-  if (riskCategory === "profanity") {
-    await tg.sendMessage(customerChatId, PROFANITY_REPLY, undefined, undefined, connectionId);
-    return;
-  }
-  if (riskCategory === "other") {
-    await tg.sendMessage(customerChatId, RISKY_CONTENT_REPLY, undefined, undefined, connectionId);
-    return;
+  const trusted = findTrusted(await getTrustedList(env, conn.ownerId), message.from.id);
+  const trustedActive = trusted !== null && (await isTrustedBypassEnabled(env, conn.ownerId));
+
+  if (!trustedActive) {
+    const riskCategory = await classifyRisk(env, text);
+    if (riskCategory === "profanity") {
+      await tg.sendMessage(customerChatId, PROFANITY_REPLY, undefined, undefined, connectionId);
+      return;
+    }
+    if (riskCategory === "other") {
+      await tg.sendMessage(customerChatId, RISKY_CONTENT_REPLY, undefined, undefined, connectionId);
+      return;
+    }
   }
 
   const faq = await getFaq(env, conn.ownerId);

@@ -1,4 +1,4 @@
-import type { ChatSettings, Env, FaqEntry, HistoryMessage, VipEntry } from "./types";
+import type { ChatSettings, Env, FaqEntry, HistoryMessage, TrustedEntry, VipEntry } from "./types";
 
 const ADMINS_KEY = "admins";
 const OWNER_KEY = "owner";
@@ -19,6 +19,14 @@ function chatFaqKey(chatId: number): string {
 
 function chatVipKey(chatId: number): string {
   return `chat:${chatId}:vip`;
+}
+
+function chatTrustedKey(chatId: number): string {
+  return `chat:${chatId}:trusted`;
+}
+
+function chatTrustedEnabledKey(chatId: number): string {
+  return `chat:${chatId}:trusted_enabled`;
 }
 
 function businessConnectionKey(connectionId: string): string {
@@ -182,6 +190,47 @@ export async function removeVipEntry(env: Env, chatId: number, index: number): P
 
 export function findVip(list: VipEntry[], userId: number): VipEntry | null {
   return list.find((v) => v.id === userId) ?? null;
+}
+
+/**
+ * People on this list skip the content-restriction layer (religion, and every other
+ * "other"/profanity category) entirely - AI talks to them about anything. The safety
+ * guardrails that protect the owner personally (never agree to meet, never share phone/
+ * Telegram ID/group counts) still apply regardless. Meant for family/close contacts the
+ * admin has personally vetted, not the general public.
+ */
+export async function getTrustedList(env: Env, chatId: number): Promise<TrustedEntry[]> {
+  const raw = await env.BOT_KV.get(chatTrustedKey(chatId));
+  if (raw === null) return [];
+  return JSON.parse(raw) as TrustedEntry[];
+}
+
+export async function addTrustedEntry(env: Env, chatId: number, entry: TrustedEntry): Promise<void> {
+  const list = await getTrustedList(env, chatId);
+  list.push(entry);
+  await env.BOT_KV.put(chatTrustedKey(chatId), JSON.stringify(list));
+}
+
+export async function removeTrustedEntry(env: Env, chatId: number, index: number): Promise<boolean> {
+  const list = await getTrustedList(env, chatId);
+  if (index < 0 || index >= list.length) return false;
+  list.splice(index, 1);
+  await env.BOT_KV.put(chatTrustedKey(chatId), JSON.stringify(list));
+  return true;
+}
+
+export function findTrusted(list: TrustedEntry[], userId: number): TrustedEntry | null {
+  return list.find((t) => t.id === userId) ?? null;
+}
+
+/** Master on/off switch for the whole trusted-list bypass, independent of list membership. */
+export async function isTrustedBypassEnabled(env: Env, chatId: number): Promise<boolean> {
+  const raw = await env.BOT_KV.get(chatTrustedEnabledKey(chatId));
+  return raw === null ? true : raw === "true";
+}
+
+export async function setTrustedBypassEnabled(env: Env, chatId: number, enabled: boolean): Promise<void> {
+  await env.BOT_KV.put(chatTrustedEnabledKey(chatId), String(enabled));
 }
 
 async function getIdSet(env: Env, key: string): Promise<Set<number>> {
