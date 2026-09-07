@@ -9,6 +9,10 @@ id = "2d5a17bfa63b45beb593c9079736eadb"
 [ai]
 binding = "AI"
 
+# Har soatda ishga tushadi (checkAnnouncements) - saytdagi yangi e'lonni tekshirib turadi.
+[triggers]
+crons = ["0 * * * *"]
+
 [vars]
 # ADMIN_IDS va OWNER_ID endi bu yerda emas - ular maxfiy (wrangler secret put orqali
 # qo'yiladi), chunki bu fayl ochiq (public) GitHub repositoriyasida saqlanadi.
@@ -21,6 +25,7 @@ CLAUDE_MAX_TOKENS = "1024"
 CLAUDE_EFFORT = "low"
 HISTORY_LIMIT = "20"
 APP_BASE_URL = "https://avtojavobbot.bek8896ok.workers.dev"
+ANNOUNCEMENTS_URL = "https://uzswlu.uz/yangiliklar?tab=3&q="
 DEFAULT_SYSTEM_PROMPT = "Siz foydalanuvchi nomidan Telegram orqali avtomatik javob beruvchi yordamchisiz. Qisqa, aniq va samimiy javob bering. Agar savolga ishonchli javob bera olmasangiz, buni ochiq ayting va foydalanuvchi tez orada shaxsan javob berishini bildiring."
 
 # Maxfiy qiymatlar (wrangler secret put orqali qo'yiladi, bu faylga yozilmaydi):

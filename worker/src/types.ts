@@ -14,6 +14,7 @@ export interface Env {
   HISTORY_LIMIT: string;
   DEFAULT_SYSTEM_PROMPT: string;
   APP_BASE_URL: string;
+  ANNOUNCEMENTS_URL: string;
 }
 
 export interface ChatSettings {

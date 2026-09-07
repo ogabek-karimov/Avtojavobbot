@@ -1,3 +1,4 @@
+import { checkAnnouncements } from "./announcements";
 import { validateInitData } from "./auth";
 import { getReply } from "./reply";
 import { telegramApi, type InlineKeyboard } from "./telegram";
@@ -204,6 +205,7 @@ export default {
       return new Response("OK", { status: 200 });
     }
 
+
     if (request.method === "GET" && url.pathname === "/app") {
       return new Response(renderAppHtml(), {
         status: 200,
@@ -233,6 +235,10 @@ export default {
     }
 
     return new Response("Not found", { status: 404 });
+  },
+
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(checkAnnouncements(env));
   },
 };
 
