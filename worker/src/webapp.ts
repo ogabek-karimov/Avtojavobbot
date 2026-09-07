@@ -121,6 +121,13 @@ export function renderAppHtml(): string {
         </div>
         <div id="statRespondedCount" style="font-size:20px; font-weight:700">0</div>
       </div>
+      <div class="btn-row">
+        <button id="downloadReportBtn" style="width:100%">📥 Hisobotni PDF yuklab olish</button>
+      </div>
+      <div class="hint" style="margin-top:6px">
+        Har bosganingizda eng so'nggi holat bilan yangi PDF yaratiladi - har bir foydalanuvchi
+        yozgan xabar va botning javobi (kim, qachon, nima yozdi, nima javob berildi).
+      </div>
     </div>
 
     <div class="card">
@@ -570,6 +577,20 @@ export function renderAppHtml(): string {
       });
       render(state);
       tg.showAlert("Saqlandi.");
+    } catch (e) {
+      tg.showAlert("Xatolik: " + e.message);
+    }
+  });
+
+  document.getElementById("downloadReportBtn").addEventListener("click", async () => {
+    try {
+      const res = await api("/api/action", { action: "report_token" });
+      const url = window.location.origin + "/report.pdf?token=" + encodeURIComponent(res.token);
+      if (tg.openLink) {
+        tg.openLink(url);
+      } else {
+        window.open(url, "_blank");
+      }
     } catch (e) {
       tg.showAlert("Xatolik: " + e.message);
     }

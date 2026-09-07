@@ -1,9 +1,20 @@
-import type { ChatSettings, Env, FaqEntry, HistoryMessage, ServiceIntake, TrustedEntry, VipEntry } from "./types";
+import type {
+  ChatSettings,
+  Env,
+  FaqEntry,
+  HistoryMessage,
+  InteractionLogEntry,
+  ServiceIntake,
+  TrustedEntry,
+  VipEntry,
+} from "./types";
 
 const ADMINS_KEY = "admins";
 const OWNER_KEY = "owner";
 const STATS_REPLIED_KEY = "stats:replied_users";
 const STATS_RESPONDED_KEY = "stats:responded_users";
+const REPORT_LOG_KEY = "report:log";
+export const REPORT_LOG_CAP = 500; // hisobot cheksiz o'smasin - eng eskilari avtomatik chetlanadi
 
 function chatSettingsKey(chatId: number): string {
   return `chat:${chatId}:settings`;
@@ -298,4 +309,27 @@ export async function getStats(env: Env): Promise<{ repliedCount: number; respon
     getIdSet(env, STATS_RESPONDED_KEY),
   ]);
   return { repliedCount: repliedUsers.size, respondedCount: respondedUsers.size };
+}
+
+/**
+ * Appends one row to the PDF-report log (every real exchange: what a user sent and what the
+ * bot sent back, regardless of which path handled it - AI, FAQ, VIP hold, intake, or a
+ * blocked-content reply). Capped at REPORT_LOG_CAP, oldest dropped first - same bounded-growth
+ * pattern as the announcements poller's seen-URL list, so this never grows without limit.
+ */
+export async function logInteraction(env: Env, entry: Omit<InteractionLogEntry, "timestamp">): Promise<void> {
+  const log = await getInteractionLog(env);
+  log.push({ ...entry, timestamp: Date.now() });
+  while (log.length > REPORT_LOG_CAP) log.shift();
+  await env.BOT_KV.put(REPORT_LOG_KEY, JSON.stringify(log));
+}
+
+export async function getInteractionLog(env: Env): Promise<InteractionLogEntry[]> {
+  const raw = await env.BOT_KV.get(REPORT_LOG_KEY);
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as InteractionLogEntry[];
+  } catch {
+    return [];
+  }
 }

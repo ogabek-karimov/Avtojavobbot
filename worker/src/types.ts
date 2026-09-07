@@ -48,6 +48,16 @@ export interface ServiceIntake {
   reply: string;
 }
 
+/** One row in the downloadable PDF report - every message a real person sent and what the bot sent back. */
+export interface InteractionLogEntry {
+  timestamp: number; // epoch ms
+  sender: string; // ism (@username yoki ID)
+  channel: "oddiy" | "biznes"; // regular chat vs Telegram Business
+  category: "AI" | "VIP" | "Ishonchli" | "FAQ" | "Xizmat so'rovi" | "Haqorat" | "Cheklangan mavzu";
+  userText: string;
+  botReply: string;
+}
+
 // Minimal Telegram types - just the fields this bot actually reads.
 export interface TelegramUser {
   id: number;

@@ -1,6 +1,7 @@
 import { checkAnnouncements } from "./announcements";
 import { validateInitData } from "./auth";
 import { getReply } from "./reply";
+import { buildReportPdf } from "./report";
 import { telegramApi, type InlineKeyboard } from "./telegram";
 import { classifyServiceRequest } from "./intake";
 import {
@@ -24,6 +25,7 @@ import {
   isAdmin,
   isOwner,
   isTrustedBypassEnabled,
+  logInteraction,
   matchFaq,
   recordAutoReplyInteraction,
   removeAdmin,
@@ -220,6 +222,24 @@ export default {
       return handleApiAction(request, env);
     }
 
+    if (request.method === "GET" && url.pathname === "/report.pdf") {
+      const token = url.searchParams.get("token") ?? "";
+      const key = `report_token:${token}`;
+      const ownerOfToken = token ? await env.BOT_KV.get(key) : null;
+      if (!ownerOfToken) {
+        return new Response("Havola muddati tugagan yoki noto'g'ri. Mini App'da qaytadan bosing.", { status: 403 });
+      }
+      await env.BOT_KV.delete(key); // bir martalik havola
+      const pdfBytes = await buildReportPdf(env);
+      return new Response(pdfBytes, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": 'attachment; filename="hisobot.pdf"',
+        },
+      });
+    }
+
     if (request.method === "POST" && url.pathname === "/telegram-webhook") {
       const secret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
       if (secret !== env.TELEGRAM_WEBHOOK_SECRET) {
@@ -410,6 +430,15 @@ async function handleApiAction(request: Request, env: Env): Promise<Response> {
       await setServiceIntake(env, ownerId, { enabled, description, reply: intakeReply });
       break;
     }
+    case "report_token": {
+      // Mini App'ning o'zi PDF fayl "yuklab olish"ni to'g'ridan-to'g'ri bajara olmaydi (u
+      // Telegram ichidagi WebView, tashqi havolani tizim brauzerida ochish kerak) - shuning
+      // uchun bir martalik, 5 daqiqa amal qiladigan token beramiz, keyin uni brauzer /report.pdf
+      // ga ochadi. Muddati KV'ning o'zi orqali tugaydi (expirationTtl) - qo'lda tozalash shart emas.
+      const token = crypto.randomUUID();
+      await env.BOT_KV.put(`report_token:${token}`, String(userId), { expirationTtl: 300 });
+      return new Response(JSON.stringify({ token }), { headers: { "Content-Type": "application/json" } });
+    }
     default:
       return new Response("Noma'lum amal.", { status: 400 });
   }
@@ -459,12 +488,15 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
   await recordAutoReplyInteraction(env, userId);
 
   const ownerName = (await tg.getChatFirstName(ownerId)) ?? "Admin";
+  const label = senderLabel(message.from);
 
   const vip = findVip(await getVipList(env, ownerId), userId);
   if (vip) {
-    await tg.sendMessage(chatId, vipHoldingMessage(ownerName));
+    const holding = vipHoldingMessage(ownerName);
+    await tg.sendMessage(chatId, holding);
+    await logInteraction(env, { sender: label, channel: "oddiy", category: "VIP", userText: text, botReply: holding });
     if (!(await isAdmin(env, userId))) {
-      await tg.sendMessage(ownerId, vipNotification(vip, senderLabel(message.from), text));
+      await tg.sendMessage(ownerId, vipNotification(vip, label, text));
     }
     return;
   }
@@ -476,10 +508,12 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
     const riskCategory = await classifyRisk(env, text);
     if (riskCategory === "profanity") {
       await tg.sendMessage(chatId, PROFANITY_REPLY);
+      await logInteraction(env, { sender: label, channel: "oddiy", category: "Haqorat", userText: text, botReply: PROFANITY_REPLY });
       return;
     }
     if (riskCategory === "other") {
       await tg.sendMessage(chatId, RISKY_CONTENT_REPLY);
+      await logInteraction(env, { sender: label, channel: "oddiy", category: "Cheklangan mavzu", userText: text, botReply: RISKY_CONTENT_REPLY });
       return;
     }
   }
@@ -487,15 +521,19 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
   const faq = await getFaq(env, ownerId);
   const faqReply = matchFaq(faq, text);
   if (faqReply) {
-    await tg.sendMessage(chatId, substitutePlaceholders(faqReply, ownerName));
+    const reply = substitutePlaceholders(faqReply, ownerName);
+    await tg.sendMessage(chatId, reply);
+    await logInteraction(env, { sender: label, channel: "oddiy", category: "FAQ", userText: text, botReply: reply });
     return;
   }
 
   const intake = await getServiceIntake(env, ownerId);
   if (intake.enabled && intake.description && (await classifyServiceRequest(env, text, intake.description))) {
-    await tg.sendMessage(chatId, substitutePlaceholders(intake.reply, ownerName));
+    const reply = substitutePlaceholders(intake.reply, ownerName);
+    await tg.sendMessage(chatId, reply);
+    await logInteraction(env, { sender: label, channel: "oddiy", category: "Xizmat so'rovi", userText: text, botReply: reply });
     if (!(await isAdmin(env, userId))) {
-      await tg.sendMessage(ownerId, intakeNotification(senderLabel(message.from), text));
+      await tg.sendMessage(ownerId, intakeNotification(label, text));
     }
     return;
   }
@@ -509,8 +547,9 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
   await appendHistory(env, chatId, { role: "assistant", content: aiText }, limit);
   const reply = `${introSentence(null)}\n\n${aiText}`;
   await tg.sendMessage(chatId, reply);
+  await logInteraction(env, { sender: label, channel: "oddiy", category: "AI", userText: text, botReply: reply });
   if (!(await isAdmin(env, userId))) {
-    await tg.sendMessage(ownerId, conversationNotification(senderLabel(message.from), text, aiText));
+    await tg.sendMessage(ownerId, conversationNotification(label, text, aiText));
   }
 }
 
@@ -554,12 +593,15 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
 
   // Kesh emas - har safar jonli o'qiladi, shunda profil ismi o'zgarsa ham darhol aks etadi.
   const liveOwnerName = (await tg.getChatFirstName(conn.ownerId)) ?? conn.ownerFirstName;
+  const label = senderLabel(message.from);
 
   const vip = findVip(await getVipList(env, conn.ownerId), message.from.id);
   if (vip) {
-    await tg.sendMessage(customerChatId, vipHoldingMessage(liveOwnerName), undefined, undefined, connectionId);
+    const holding = vipHoldingMessage(liveOwnerName);
+    await tg.sendMessage(customerChatId, holding, undefined, undefined, connectionId);
+    await logInteraction(env, { sender: label, channel: "biznes", category: "VIP", userText: text, botReply: holding });
     if (!(await isAdmin(env, message.from.id))) {
-      await tg.sendMessage(conn.ownerId, vipNotification(vip, senderLabel(message.from), text));
+      await tg.sendMessage(conn.ownerId, vipNotification(vip, label, text));
     }
     return;
   }
@@ -571,10 +613,12 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
     const riskCategory = await classifyRisk(env, text);
     if (riskCategory === "profanity") {
       await tg.sendMessage(customerChatId, PROFANITY_REPLY, undefined, undefined, connectionId);
+      await logInteraction(env, { sender: label, channel: "biznes", category: "Haqorat", userText: text, botReply: PROFANITY_REPLY });
       return;
     }
     if (riskCategory === "other") {
       await tg.sendMessage(customerChatId, RISKY_CONTENT_REPLY, undefined, undefined, connectionId);
+      await logInteraction(env, { sender: label, channel: "biznes", category: "Cheklangan mavzu", userText: text, botReply: RISKY_CONTENT_REPLY });
       return;
     }
   }
@@ -582,21 +626,19 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
   const faq = await getFaq(env, conn.ownerId);
   const faqReply = matchFaq(faq, text);
   if (faqReply) {
-    await tg.sendMessage(customerChatId, substitutePlaceholders(faqReply, liveOwnerName), undefined, undefined, connectionId);
+    const reply = substitutePlaceholders(faqReply, liveOwnerName);
+    await tg.sendMessage(customerChatId, reply, undefined, undefined, connectionId);
+    await logInteraction(env, { sender: label, channel: "biznes", category: "FAQ", userText: text, botReply: reply });
     return;
   }
 
   const intake = await getServiceIntake(env, conn.ownerId);
   if (intake.enabled && intake.description && (await classifyServiceRequest(env, text, intake.description))) {
-    await tg.sendMessage(
-      customerChatId,
-      substitutePlaceholders(intake.reply, liveOwnerName),
-      undefined,
-      undefined,
-      connectionId,
-    );
+    const reply = substitutePlaceholders(intake.reply, liveOwnerName);
+    await tg.sendMessage(customerChatId, reply, undefined, undefined, connectionId);
+    await logInteraction(env, { sender: label, channel: "biznes", category: "Xizmat so'rovi", userText: text, botReply: reply });
     if (!(await isAdmin(env, message.from.id))) {
-      await tg.sendMessage(conn.ownerId, intakeNotification(senderLabel(message.from), text));
+      await tg.sendMessage(conn.ownerId, intakeNotification(label, text));
     }
     return;
   }
@@ -610,8 +652,9 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
   await appendHistory(env, customerChatId, { role: "assistant", content: aiText }, limit);
   const reply = `${introSentence(liveOwnerName)}\n\n${aiText}`;
   await tg.sendMessage(customerChatId, reply, undefined, undefined, connectionId);
+  await logInteraction(env, { sender: label, channel: "biznes", category: "AI", userText: text, botReply: reply });
   if (!(await isAdmin(env, message.from.id))) {
-    await tg.sendMessage(conn.ownerId, conversationNotification(senderLabel(message.from), text, aiText));
+    await tg.sendMessage(conn.ownerId, conversationNotification(label, text, aiText));
   }
 }
 
