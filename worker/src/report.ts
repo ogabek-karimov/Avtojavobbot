@@ -40,6 +40,17 @@ function averageCharWidth(font: PDFFont, size: number): number {
   return width;
 }
 
+// Noto Sans - matn shrifti, rangli emoji uchun glif yo'q (buning uchun alohida, og'ir
+// rasm-asosli shrift kerak bo'lardi). pdf-lib bunday belgini jimgina .notdef (bo'sh) glifga
+// almashtiradi - xato bermaydi, lekin natijada PDF matnida ko'rinmas NULL (U+0000) belgi
+// qolib ketadi (jonli tekshirib topilgan haqiqiy nosozlik - masalan robot-emoji bilan
+// boshlangan javob matni buzilib chiqqan edi). Chizishdan oldin PDF shrifti chiza olmaydigan
+// belgilarni (emoji va ularning variatsiya tanlagichlarini) olib tashlaymiz - matnning
+// o'zi saqlanib qoladi, faqat bezak belgisi tushib qoladi.
+function sanitizeForPdf(text: string): string {
+  return text.replace(/\p{Extended_Pictographic}️?/gu, "");
+}
+
 /** Greedy word-wrap - matnni berilgan kenglikka (belgilar soni orqali, taxminan) sig'adigan qatorlarga bo'ladi. */
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
   const maxChars = Math.max(1, Math.floor(maxWidth / averageCharWidth(font, size)));
@@ -99,12 +110,12 @@ export async function buildReportPdf(env: Env): Promise<Uint8Array> {
 
   function drawLine(text: string, size: number, color: ReturnType<typeof rgb>, gap = 4): void {
     ensureSpace(size + gap);
-    page.drawText(text, { x: MARGIN, y: y - size, size, font, color });
+    page.drawText(sanitizeForPdf(text), { x: MARGIN, y: y - size, size, font, color });
     y -= size + gap;
   }
 
   function drawWrapped(text: string, size: number, color: ReturnType<typeof rgb>, indent = 0): void {
-    for (const line of wrapText(text, font, size, CONTENT_WIDTH - indent)) {
+    for (const line of wrapText(sanitizeForPdf(text), font, size, CONTENT_WIDTH - indent)) {
       ensureSpace(size + 3);
       page.drawText(line, { x: MARGIN + indent, y: y - size, size, font, color });
       y -= size + 3;
