@@ -9,52 +9,45 @@ interface AnnouncementInfo {
 }
 
 /**
- * Scrapes the site's announcements listing page for the newest (first) card. The page is
- * plain server-rendered HTML (verified - no client-side JS rendering needed), so
- * HTMLRewriter can extract it directly without a full DOM/browser. Only the very first
- * matching element of each selector is kept (the "recording" flags turn off once a second
- * match starts) - that's the newest announcement, since the listing sorts newest-first.
+ * Scrapes the site's announcements listing page for ALL cards on it (the page returns ~20
+ * per load, no infinite scroll needed). The page is plain server-rendered HTML (verified -
+ * no client-side JS rendering needed), so HTMLRewriter can extract it directly without a
+ * full DOM/browser. Each selector's `element()` callback starts a new slot in its array and
+ * `text()` appends into the current (last) slot - since HTMLRewriter fires these strictly in
+ * document order, the three arrays end up aligned by card index.
  */
-async function fetchLatestAnnouncement(env: Env): Promise<AnnouncementInfo | null> {
+async function fetchAnnouncementCards(env: Env): Promise<AnnouncementInfo[]> {
   const res = await fetch(env.ANNOUNCEMENTS_URL, {
     headers: {
       "User-Agent": "Mozilla/5.0 (compatible; AvtojavobBot/1.0; +https://avtojavobbot.bek8896ok.workers.dev)",
     },
   });
-  if (!res.ok) return null;
+  if (!res.ok) return [];
 
-  let cardsSeen = 0;
-  let titleSeen = 0;
-  let dateSeen = 0;
-  let recordingTitle = false;
-  let recordingDate = false;
-  let rawTitle = "";
-  let rawDate = "";
-  let firstHref: string | null = null;
+  const hrefs: (string | null)[] = [];
+  const titles: string[] = [];
+  const dates: string[] = [];
 
   const rewriter = new HTMLRewriter()
     .on("a.news-card-link", {
       element(el) {
-        cardsSeen++;
-        if (cardsSeen === 1) firstHref = el.getAttribute("href");
+        hrefs.push(el.getAttribute("href"));
       },
     })
     .on("h3.news-card-title", {
       element() {
-        titleSeen++;
-        recordingTitle = titleSeen === 1;
+        titles.push("");
       },
       text(t) {
-        if (recordingTitle) rawTitle += t.text;
+        if (titles.length > 0) titles[titles.length - 1] += t.text;
       },
     })
     .on("span.news-card-date", {
       element() {
-        dateSeen++;
-        recordingDate = dateSeen === 1;
+        dates.push("");
       },
       text(t) {
-        if (recordingDate) rawDate += t.text;
+        if (dates.length > 0) dates[dates.length - 1] += t.text;
       },
     });
 
@@ -62,42 +55,60 @@ async function fetchLatestAnnouncement(env: Env): Promise<AnnouncementInfo | nul
   // the stream through them. The rewritten output itself is discarded (side effects only).
   await rewriter.transform(res).text();
 
-  if (!firstHref) return null;
-
-  return {
-    url: new URL(firstHref, env.ANNOUNCEMENTS_URL).toString(),
-    title: rawTitle.trim(),
-    date: rawDate.trim(),
-  };
+  const count = Math.min(hrefs.length, titles.length, dates.length);
+  const cards: AnnouncementInfo[] = [];
+  for (let i = 0; i < count; i++) {
+    const href = hrefs[i];
+    if (!href) continue;
+    cards.push({
+      url: new URL(href, env.ANNOUNCEMENTS_URL).toString(),
+      title: titles[i].trim(),
+      date: dates[i].trim(),
+    });
+  }
+  return cards;
 }
 
-/** Plain text of the announcement's own body (div.blog-content) - where the actual event date/time lives. */
+/**
+ * Plain text of the announcement's own body (div.blog-content) - where the actual event
+ * date/time lives. Fetching 20 cards' worth of detail pages back-to-back occasionally hits
+ * a transient network hiccup, so this retries once before giving up - a caller seeing null
+ * here must NOT treat it as "this announcement isn't about Zoom" (see pollForNewAnnouncements).
+ */
 async function fetchArticleBodyText(url: string): Promise<string | null> {
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": "Mozilla/5.0 (compatible; AvtojavobBot/1.0; +https://avtojavobbot.bek8896ok.workers.dev)",
-    },
-  });
-  if (!res.ok) return null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; AvtojavobBot/1.0; +https://avtojavobbot.bek8896ok.workers.dev)",
+        },
+      });
+      if (res.ok) {
+        let recording = false;
+        let seen = 0;
+        let text = "";
 
-  let recording = false;
-  let seen = 0;
-  let text = "";
+        const rewriter = new HTMLRewriter().on("div.blog-content", {
+          element() {
+            seen++;
+            recording = seen === 1;
+          },
+          text(t) {
+            if (recording) text += t.text;
+            // Ko'p paragraf o'qishning hojati yo'q - sana odatda eng boshida keladi.
+            if (recording && text.length > 1500) recording = false;
+          },
+        });
 
-  const rewriter = new HTMLRewriter().on("div.blog-content", {
-    element() {
-      seen++;
-      recording = seen === 1;
-    },
-    text(t) {
-      if (recording) text += t.text;
-      // Ko'p paragraf o'qishning hojati yo'q - sana odatda eng boshida keladi.
-      if (recording && text.length > 1500) recording = false;
-    },
-  });
-
-  await rewriter.transform(res).text();
-  return text.trim() || null;
+        await rewriter.transform(res).text();
+        return text.trim() || null;
+      }
+    } catch (error) {
+      console.error("fetchArticleBodyText failed", url, error);
+    }
+    if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  return null;
 }
 
 interface EventDateInfo {
@@ -164,8 +175,24 @@ interface PendingEvent {
   reminded: boolean;
 }
 
-const LAST_SEEN_KEY = "announcements:last_seen_url";
+const SEEN_KEY = "announcements:seen_urls";
+const SEEN_CAP = 200; // ro'yxat cheksiz o'smasligi uchun - eng eskilari chetlab tashlanadi
 const PENDING_KEY = "announcements:pending";
+
+async function getSeenUrls(env: Env): Promise<string[]> {
+  const raw = await env.BOT_KV.get(SEEN_KEY);
+  if (!raw) return [];
+  try {
+    return JSON.parse(raw) as string[];
+  } catch {
+    return [];
+  }
+}
+
+async function saveSeenUrls(env: Env, urls: string[]): Promise<void> {
+  const capped = urls.length > SEEN_CAP ? urls.slice(urls.length - SEEN_CAP) : urls;
+  await env.BOT_KV.put(SEEN_KEY, JSON.stringify(capped));
+}
 
 async function getPending(env: Env): Promise<PendingEvent[]> {
   const raw = await env.BOT_KV.get(PENDING_KEY);
@@ -181,46 +208,80 @@ async function savePending(env: Env, list: PendingEvent[]): Promise<void> {
   await env.BOT_KV.put(PENDING_KEY, JSON.stringify(list));
 }
 
-/** Saytni tekshirib, yangi ZOOM e'lon topilsa uni "kutilayotgan eslatmalar" ro'yxatiga qo'shadi. */
-async function pollForNewAnnouncement(env: Env): Promise<void> {
-  const latest = await fetchLatestAnnouncement(env);
-  if (!latest || !latest.url) return;
+/**
+ * Saytdagi TO'LIQ ro'yxatni (bitta emas, barcha kartalarni) skanerlaydi va hali ko'rilmagan
+ * har bir e'lonni tekshiradi - avvalgi versiya faqat ro'yxatning eng tepasidagi (eng yangi)
+ * kartani kuzatgani uchun, o'rtada bir vaqtda bir nechta yangi e'lon chiqsa (yoki ro'yxat
+ * o'rtasida allaqachon turgan, hali ko'rilmagan eski e'lonlar bo'lsa) ularni butunlay
+ * o'tkazib yuborar edi. ZOOM haqida bo'lgan har bir yangi e'lon "kutilayotgan eslatmalar"
+ * ro'yxatiga qo'shiladi.
+ */
+async function pollForNewAnnouncements(env: Env): Promise<void> {
+  const cards = await fetchAnnouncementCards(env);
+  if (cards.length === 0) return;
 
-  const lastSeenUrl = await env.BOT_KV.get(LAST_SEEN_KEY);
-  if (lastSeenUrl === latest.url) return;
+  const seen = await getSeenUrls(env);
+  const seenSet = new Set(seen);
 
-  await env.BOT_KV.put(LAST_SEEN_KEY, latest.url);
-
-  // Birinchi marta ishga tushganda (hali hech narsa saqlanmagan) hech narsa rejalashtirilmaydi -
-  // aks holda hozir saytda turgan eng so'nggi e'lon ham "yangi" deb noto'g'ri chiqib ketadi.
-  if (lastSeenUrl === null) return;
-
-  const articleText = await fetchArticleBodyText(latest.url);
-
-  // Faqat ZOOM orqali o'tkaziladigan e'lonlar bilan ishlaymiz - boshqa turdagi e'lonlar kerak emas.
-  const mentionsZoom = /zoom/i.test(latest.title) || (articleText ? /zoom/i.test(articleText) : false);
-  if (!mentionsZoom) return;
-
-  const eventInfo = articleText ? await extractEventDateInfo(env, articleText) : null;
-
-  if (!eventInfo) {
-    // Sana aniqlanmasa 1 kun oldin eslatib bo'lmaydi - imkoniyatni boy bermaslik uchun
-    // shu holatda darhol xabar beramiz.
-    const ownerId = await getOwner(env);
-    const tg = telegramApi(env.TELEGRAM_BOT_TOKEN);
-    await tg.sendMessage(
-      ownerId,
-      `📢 Yangi ZOOM e'lon (aniq sanasini avtomatik topib bo'lmadi):\n\n${latest.title}\n🔗 ${latest.url}`,
-    );
-    return;
-  }
+  // Ro'yxatda eng yangisi tepada turadi - eskisidan yangisiga qarab ishlov beramiz, shunda
+  // bir nechta yangi e'lon bo'lsa xabarlar xronologik tartibda ketadi.
+  const newCards = cards.filter((c): c is AnnouncementInfo & { url: string } => Boolean(c.url) && !seenSet.has(c.url as string)).reverse();
+  if (newCards.length === 0) return;
 
   const pending = await getPending(env);
-  pending.push({ url: latest.url, title: latest.title, isoDate: eventInfo.isoDate, timeText: eventInfo.timeText, reminded: false });
+  const pendingUrls = new Set(pending.map((p) => p.url));
+  const ownerId = await getOwner(env);
+  const tg = telegramApi(env.TELEGRAM_BOT_TOKEN);
+
+  for (const card of newCards) {
+    if (pendingUrls.has(card.url)) {
+      seen.push(card.url); // xavfsizlik uchun - ikki marta rejalashtirilmasin
+      continue;
+    }
+
+    try {
+      const articleText = await fetchArticleBodyText(card.url);
+      if (!articleText) {
+        // Maqola matnini o'qib bo'lmadi (vaqtinchalik tarmoq xatosi bo'lishi mumkin) -
+        // "ko'rilgan" deb belgilamaymiz, keyingi soatlik tekshiruvda qayta urinib ko'radi.
+        // Buni "ZOOM emas" deb xato xulosa chiqarib, butunlay yo'qotib qo'yish mumkin emas.
+        continue;
+      }
+
+      seen.push(card.url); // endi maqola muvaffaqiyatli o'qildi - qayta ko'rib chiqilmaydi
+
+      const mentionsZoom = /zoom/i.test(card.title) || /zoom/i.test(articleText);
+      if (!mentionsZoom) continue; // faqat ZOOM orqali o'tkaziladigan e'lonlar kerak
+
+      const eventInfo = await extractEventDateInfo(env, articleText);
+
+      if (!eventInfo) {
+        // Sana aniqlanmasa 1 kun oldin eslatib bo'lmaydi - imkoniyatni boy bermaslik uchun
+        // shu holatda darhol xabar beramiz.
+        await tg.sendMessage(
+          ownerId,
+          `📢 Yangi ZOOM e'lon (aniq sanasini avtomatik topib bo'lmadi):\n\n${card.title}\n📅 E'lon joylangan sana: ${card.date}\n🔗 ${card.url}`,
+        );
+        continue;
+      }
+
+      pending.push({ url: card.url, title: card.title, isoDate: eventInfo.isoDate, timeText: eventInfo.timeText, reminded: false });
+      pendingUrls.add(card.url);
+    } catch (error) {
+      // Bitta kartadagi kutilmagan xato qolgan barcha kartalarni tekshirishni to'xtatib
+      // qo'ymasin - shu kartani o'tkazib yuboramiz, "ko'rilgan" deb belgilamaymiz.
+      console.error("Failed to process announcement card", card.url, error);
+    }
+  }
+
+  await saveSeenUrls(env, seen);
   await savePending(env, pending);
 }
 
-/** Kutilayotgan tadbirlarni ko'rib chiqadi - tadbirdan 1 kun oldin (Toshkent vaqti) eslatma yuboradi. */
+/**
+ * Kutilayotgan tadbirlarni ko'rib chiqadi - tadbir sanasi ertaga (yoki, agar e'lon o'sha
+ * kuniyoq joylangan bo'lsa, bugun) bo'lsa Toshkent vaqti bo'yicha eslatma yuboradi.
+ */
 async function sendDueReminders(env: Env): Promise<void> {
   const pending = await getPending(env);
   if (pending.length === 0) return;
@@ -241,10 +302,14 @@ async function sendDueReminders(env: Env): Promise<void> {
       continue;
     }
 
-    if (!ev.reminded && ev.isoDate === tomorrow) {
+    // Odatda "ertaga" (1 kun oldin) eslatiladi; agar e'lon tadbir kuniyoq joylangan bo'lsa
+    // (isoDate === today), keyingi tekshiruvda "ertaga" bosqichi o'tib ketmasligi uchun
+    // shu kuniyoq darhol yuboriladi.
+    if (!ev.reminded && ev.isoDate <= tomorrow) {
+      const label = ev.isoDate === today ? "BUGUN" : "ertaga";
       await tg.sendMessage(
         ownerId,
-        `⏰ Eslatma: ertaga (${ev.isoDate}) ${ev.timeText} ZOOM orqali bo'lib o'tadi:\n\n${ev.title}\n🔗 ${ev.url}`,
+        `⏰ Eslatma: ${label} (${ev.isoDate}) ${ev.timeText} ZOOM orqali bo'lib o'tadi:\n\n${ev.title}\n🔗 ${ev.url}`,
       );
       ev.reminded = true;
       changed = true;
@@ -257,12 +322,22 @@ async function sendDueReminders(env: Env): Promise<void> {
 }
 
 /**
- * Runs on the Cron Trigger (har soatda). Ikki ish qiladi: (1) saytda yangi ZOOM e'lon
- * chiqqanmi tekshiradi va uni "kutilayotgan eslatmalar" ro'yxatiga qo'shadi, (2) shu
- * ro'yxatdagi tadbirlardan qaysi biri ertaga bo'lib o'tishini tekshirib, o'sha kuni bir
- * marta (reminded flag orqali) eslatma yuboradi - darhol emas, aynan 1 kun oldin.
+ * Runs on the Cron Trigger (har soatda). Ikki ish qiladi: (1) saytdagi TO'LIQ ro'yxatni
+ * skanerlab, hali ko'rilmagan har bir ZOOM e'lonni "kutilayotgan eslatmalar" ro'yxatiga
+ * qo'shadi, (2) shu ro'yxatdagi tadbirlardan qaysi biri ertaga (yoki bugun) bo'lib
+ * o'tishini tekshirib, bir marta (reminded flag orqali) eslatma yuboradi.
  */
 export async function checkAnnouncements(env: Env): Promise<void> {
-  await pollForNewAnnouncement(env);
-  await sendDueReminders(env);
+  // Ikkalasi bir-biridan mustaqil ishlaydi - biri xato bersa ham ikkinchisi baribir
+  // ishlashi kerak (masalan, saytga ulanib bo'lmasa ham, mavjud eslatmalar yuborilaversin).
+  try {
+    await pollForNewAnnouncements(env);
+  } catch (error) {
+    console.error("pollForNewAnnouncements failed", error);
+  }
+  try {
+    await sendDueReminders(env);
+  } catch (error) {
+    console.error("sendDueReminders failed", error);
+  }
 }
