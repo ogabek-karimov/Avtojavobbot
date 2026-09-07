@@ -554,14 +554,16 @@ async function handleUpdate(update: TelegramUpdate, env: Env): Promise<void> {
 }
 
 /**
- * A user connected (or reconfigured) the bot in their Telegram Business settings.
- * We only activate it for people already on our own admin list - anyone else who
- * happens to add this bot as their business bot gets no auto-reply behavior.
+ * A user connected (or reconfigured) the bot in their Telegram Business settings. We used
+ * to gate this on isAdmin() right here - but Telegram only sends this event when the
+ * connection itself is created or changed, not when someone's admin status later changes.
+ * If a person connected the bot BEFORE being made an admin (or was removed as admin after
+ * connecting), there was no fresh event to re-check, so their connection could get silently
+ * ignored forever even after being promoted. We always record the connection now; the admin
+ * check happens on every incoming message instead (handleBusinessMessage), so it always
+ * reflects current admin status regardless of when the connection itself happened.
  */
 async function handleBusinessConnection(conn: TelegramBusinessConnection, env: Env): Promise<void> {
-  const ownerIsAdmin = await isAdmin(env, conn.user.id);
-  if (!ownerIsAdmin) return;
-
   await setBusinessConnection(env, conn.id, {
     ownerId: conn.user.id,
     ownerFirstName: conn.user.first_name,
@@ -571,8 +573,16 @@ async function handleBusinessConnection(conn: TelegramBusinessConnection, env: E
 
 /**
  * A message someone sent directly to an admin's personal Telegram account, which the
- * admin has connected to this bot via Telegram Business. Settings/prompt/FAQ come from
- * the connected admin's own configuration; conversation history is kept per customer.
+ * admin has connected to this bot via Telegram Business. Settings/prompt/FAQ/VIP/trusted/
+ * intake are the SAME single shared config every admin sees and edits in the Mini App
+ * (scoped by getOwner(env), exactly like the regular chat flow) - NOT per-connected-admin.
+ * Earlier this used conn.ownerId for that config, which meant a newly-added admin's own
+ * business connection always had autoreply stuck off (their personal chat:{id}:settings
+ * key was never created, since the Mini App only ever writes the global owner's key) -
+ * the bot silently did nothing in their chats. Only the *identity* used in the disclosure
+ * sentence and notification recipient stays per-connection (conn.ownerId) - that's
+ * genuinely account-specific, since the bot is literally running on that admin's own
+ * Telegram account. Conversation history is kept per customer.
  */
 async function handleBusinessMessage(message: TelegramMessage, env: Env): Promise<void> {
   const connectionId = message.business_connection_id;
@@ -581,12 +591,14 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
   const conn = await getBusinessConnection(env, connectionId);
   if (!conn || !conn.enabled) return;
   if (message.from.id === conn.ownerId) return; // egasining o'zi yozgan xabarga javob bermaymiz
+  if (!(await isAdmin(env, conn.ownerId))) return; // faqat hozirda admin bo'lganlar uchun
 
   const tg = telegramApi(env.TELEGRAM_BOT_TOKEN);
   const customerChatId = message.chat.id;
   const text = message.text.trim();
 
-  const settings = await getChatSettings(env, conn.ownerId);
+  const ownerId = await getOwner(env);
+  const settings = await getChatSettings(env, ownerId);
   if (!settings.autoreply) return;
 
   await recordAutoReplyInteraction(env, message.from.id);
@@ -595,7 +607,7 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
   const liveOwnerName = (await tg.getChatFirstName(conn.ownerId)) ?? conn.ownerFirstName;
   const label = senderLabel(message.from);
 
-  const vip = findVip(await getVipList(env, conn.ownerId), message.from.id);
+  const vip = findVip(await getVipList(env, ownerId), message.from.id);
   if (vip) {
     const holding = vipHoldingMessage(liveOwnerName);
     await tg.sendMessage(customerChatId, holding, undefined, undefined, connectionId);
@@ -606,8 +618,8 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
     return;
   }
 
-  const trusted = findTrusted(await getTrustedList(env, conn.ownerId), message.from.id);
-  const trustedActive = trusted !== null && (await isTrustedBypassEnabled(env, conn.ownerId));
+  const trusted = findTrusted(await getTrustedList(env, ownerId), message.from.id);
+  const trustedActive = trusted !== null && (await isTrustedBypassEnabled(env, ownerId));
 
   if (!trustedActive) {
     const riskCategory = await classifyRisk(env, text);
@@ -623,7 +635,7 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
     }
   }
 
-  const faq = await getFaq(env, conn.ownerId);
+  const faq = await getFaq(env, ownerId);
   const faqReply = matchFaq(faq, text);
   if (faqReply) {
     const reply = substitutePlaceholders(faqReply, liveOwnerName);
@@ -632,7 +644,7 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
     return;
   }
 
-  const intake = await getServiceIntake(env, conn.ownerId);
+  const intake = await getServiceIntake(env, ownerId);
   if (intake.enabled && intake.description && (await classifyServiceRequest(env, text, intake.description))) {
     const reply = substitutePlaceholders(intake.reply, liveOwnerName);
     await tg.sendMessage(customerChatId, reply, undefined, undefined, connectionId);
