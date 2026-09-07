@@ -1,32 +1,30 @@
 import type { Env, HistoryMessage } from "./types";
 
 // Har xil ko'rinishdagi bir xil "repetition collapse" nosozligining ikkita kuzatilgan turi:
-// (1) so'zma-so'z aynan bir xil qisqa so'zlarni takrorlash ("of of of count of count..."),
+// (1) so'zma-so'z aynan bir xil qisqa so'zni takrorlash ("of of of count of count..."),
 // (2) shunga o'xshash, lekin har biriga tasodifiy "-ored"/"-ing" kabi qo'shimcha qo'shib
 // "yasama" so'zlar hosil qiladigan varianti ("channelored", "belemored", "splored"...) -
 // bu holatda so'zlar texnik jihatdan "noyob" bo'lib chiqadi, shuning uchun oddiy
-// leksik-xilma-xillik tekshiruvi buni ushlab ololmaydi. Ikkala holatda ham umumiy narsa
-// bitta: natija DEYARLI BUTUNLAY inglizcha bog'lovchi/funktsional so'zlardan iborat bo'ladi
-// ("of", "the", "and", "count", "path"...) - buning o'zi allaqachon kifoya, chunki tizim
-// ko'rsatmasi javobni FAQAT o'zbek tilida talab qiladi, bunday so'zlar haqiqiy o'zbekcha
-// javobda deyarli hech qachon uchramaydi (haqiqiy namunalarda nisbat 0%, buzilgan
-// namunalarda 44-92%).
-const ENGLISH_FILLER_WORDS = new Set([
-  "of", "the", "and", "a", "an", "is", "in", "to", "for", "with", "that", "this", "it", "as",
-  "at", "by", "on", "are", "was", "were", "be", "been", "not", "no", "count", "path", "all",
-  "each", "common", "any", "other", "just", "some", "also", "both", "neither", "or", "if", "but",
-]);
-
+// leksik-xilma-xillik tekshiruvi buni yolg'iz o'zi ushlab ololmaydi.
+//
+// MUHIM: bot endi foydalanuvchi yozgan tilda (o'zbek/rus/ingliz/h.k.) javob berishi kerak,
+// shuning uchun "javobda inglizcha so'zlar ko'p bo'lsa - demak xato" degan avvalgi tekshiruv
+// endi ishlamaydi (haqiqiy inglizcha javobni ham noto'g'ri "buzilgan" deb belgilab qo'yardi).
+// Buning o'rniga TILGA BOG'LIQ BO'LMAGAN belgidan foydalanamiz: matndagi ENG KO'P
+// takrorlangan bitta so'zning umumiy so'zlar soniga nisbati. Tabiiy matnda (qaysi tilda
+// bo'lishidan qat'iy nazar) hatto eng keng tarqalgan bog'lovchi so'z ham odatda ~4-7%dan
+// oshmaydi; buzilgan namunalarda esa bitta so'z ("of") 23-48% ni tashkil etgan.
 function looksDegenerate(text: string): boolean {
   const words = text.toLowerCase().match(/[\p{L}\p{N}']+/gu) ?? [];
-  if (words.length < 15) return false; // qisqa javoblar bu muammoga uchramaydi
+  if (words.length < 25) return false; // qisqa javoblarda tasodifiy takror xato bermasin
 
-  const fillerCount = words.filter((w) => ENGLISH_FILLER_WORDS.has(w)).length;
-  if (fillerCount / words.length > 0.12) return true;
+  const counts = new Map<string, number>();
+  for (const w of words) counts.set(w, (counts.get(w) ?? 0) + 1);
+  const maxCount = Math.max(...counts.values());
+  if (maxCount / words.length > 0.15) return true;
 
   if (words.length >= 40) {
-    const unique = new Set(words);
-    if (unique.size / words.length < 0.3) return true;
+    if (counts.size / words.length < 0.3) return true;
   }
 
   return false;
