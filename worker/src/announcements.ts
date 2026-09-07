@@ -148,6 +148,14 @@ export async function checkAnnouncements(env: Env): Promise<void> {
   if (lastSeenUrl === null) return;
 
   const articleText = await fetchArticleBodyText(latest.url);
+
+  // Faqat ZOOM orqali o'tkaziladigan e'lonlar haqida ogohlantiramiz - boshqa turdagi
+  // e'lonlar (ZOOM haqida so'z yo'q) o'tkazib yuboriladi, ammo lastSeenUrl baribir
+  // yangilanadi (yuqorida) - shu e'lonni "ko'rilgan" deb belgilash uchun, aks holda
+  // keyingi tekshiruvda ham qayta-qayta ko'rib chiqiladi.
+  const mentionsZoom = /zoom/i.test(latest.title) || (articleText ? /zoom/i.test(articleText) : false);
+  if (!mentionsZoom) return;
+
   const eventDateTime = articleText ? await extractEventDateTime(env, articleText) : null;
 
   const dateLine = eventDateTime
