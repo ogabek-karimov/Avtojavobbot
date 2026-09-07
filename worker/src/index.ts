@@ -205,7 +205,6 @@ export default {
       return new Response("OK", { status: 200 });
     }
 
-
     if (request.method === "GET" && url.pathname === "/app") {
       return new Response(renderAppHtml(), {
         status: 200,

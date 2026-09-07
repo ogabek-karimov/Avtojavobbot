@@ -71,6 +71,66 @@ async function fetchLatestAnnouncement(env: Env): Promise<AnnouncementInfo | nul
   };
 }
 
+/** Plain text of the announcement's own body (div.blog-content) - where the actual event date/time lives. */
+async function fetchArticleBodyText(url: string): Promise<string | null> {
+  const res = await fetch(url, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (compatible; AvtojavobBot/1.0; +https://avtojavobbot.bek8896ok.workers.dev)",
+    },
+  });
+  if (!res.ok) return null;
+
+  let recording = false;
+  let seen = 0;
+  let text = "";
+
+  const rewriter = new HTMLRewriter().on("div.blog-content", {
+    element() {
+      seen++;
+      recording = seen === 1;
+    },
+    text(t) {
+      if (recording) text += t.text;
+      // Ko'p paragraf o'qishning hojati yo'q - sana odatda eng boshida keladi.
+      if (recording && text.length > 1500) recording = false;
+    },
+  });
+
+  await rewriter.transform(res).text();
+  return text.trim() || null;
+}
+
+/**
+ * Meaning-based (not regex-pattern) extraction of the event's actual date/time from the
+ * announcement's own body text - the listing page's "date" is just the publish date, not
+ * when the defense/seminar happens. Same reliable pattern as the other AI classifiers in
+ * this project (temperature 0, strict single-line output, fails to null on any error).
+ */
+async function extractEventDateTime(env: Env, articleText: string): Promise<string | null> {
+  try {
+    const systemPrompt =
+      "Quyidagi e'lon matnidan tadbir (himoya/seminar/konferensiya) o'tkaziladigan ANIQ sana va soatni toping. " +
+      "Faqat sana (yil bilan) va soatni qisqa, tushunarli qilib yozing (masalan: \"2026-yil 9-sentabr, soat " +
+      "12:00\"). Boshqa hech narsa, izoh yoki qo'shimcha so'z yozmang. Agar matnda aniq sana yoki soat " +
+      "topilmasa, faqat bitta so'z bilan javob bering: NOANIQ.";
+
+    const result = (await env.AI.run(env.WORKERS_AI_MODEL as Parameters<Ai["run"]>[0], {
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: articleText },
+      ],
+      temperature: 0,
+    } as never)) as { response?: string };
+
+    const answer = (result?.response ?? "").trim();
+    if (!answer || answer.toUpperCase().includes("NOANIQ")) return null;
+    return answer;
+  } catch (error) {
+    console.error("Event date/time extraction failed", error);
+    return null;
+  }
+}
+
 const LAST_SEEN_KEY = "announcements:last_seen_url";
 
 /** Runs on the Cron Trigger. Notifies the owner only when the newest announcement's URL changes. */
@@ -87,7 +147,14 @@ export async function checkAnnouncements(env: Env): Promise<void> {
   // aks holda hozir saytda turgan eng so'nggi e'lon ham "yangi" deb noto'g'ri chiqib ketadi.
   if (lastSeenUrl === null) return;
 
+  const articleText = await fetchArticleBodyText(latest.url);
+  const eventDateTime = articleText ? await extractEventDateTime(env, articleText) : null;
+
+  const dateLine = eventDateTime
+    ? `🗓 O'tkaziladigan sana: ${eventDateTime}`
+    : `📅 E'lon joylangan sana: ${latest.date}`;
+
   const ownerId = await getOwner(env);
   const tg = telegramApi(env.TELEGRAM_BOT_TOKEN);
-  await tg.sendMessage(ownerId, `📢 Saytda yangi e'lon!\n\n${latest.title}\n📅 ${latest.date}\n🔗 ${latest.url}`);
+  await tg.sendMessage(ownerId, `📢 Saytda yangi e'lon!\n\n${latest.title}\n${dateLine}\n🔗 ${latest.url}`);
 }
