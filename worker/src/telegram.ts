@@ -65,6 +65,33 @@ export function telegramApi(token: string) {
       return error;
     },
 
+    /** file_id orqali qayta yuborib bo'lmasa: faylni Telegram serveridan yuklab olib, yangi fayl sifatida yuklaydi. */
+    async reuploadMedia(
+      chatId: number,
+      kind: "photo" | "video" | "video_note" | "voice" | "audio",
+      fileId: string,
+      caption?: string,
+    ): Promise<string | null> {
+      const info = await fetch(`${base}/getFile?file_id=${encodeURIComponent(fileId)}`);
+      const infoBody = (await info.json()) as { ok: boolean; result?: { file_path?: string }; description?: string };
+      if (!infoBody.ok || !infoBody.result?.file_path) {
+        console.error("getFile failed", JSON.stringify(infoBody));
+        return infoBody.description ?? "getFile failed";
+      }
+      const file = await fetch(`https://api.telegram.org/file/bot${token}/${infoBody.result.file_path}`);
+      if (!file.ok) return `download failed ${file.status}`;
+      const form = new FormData();
+      form.append("chat_id", String(chatId));
+      form.append(kind, new Blob([await file.arrayBuffer()]), infoBody.result.file_path.split("/").pop() ?? "file");
+      if (caption && kind !== "video_note") form.append("caption", caption);
+      const method = { photo: "sendPhoto", video: "sendVideo", video_note: "sendVideoNote", voice: "sendVoice", audio: "sendAudio" }[kind];
+      const res = await fetch(`${base}/${method}`, { method: "POST", body: form });
+      if (res.ok) return null;
+      const error = await res.text();
+      console.error(`${method} upload failed`, res.status, error);
+      return error;
+    },
+
     async editMessageText(
       chatId: number,
       messageId: number,

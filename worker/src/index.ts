@@ -175,6 +175,10 @@ async function forwardWatchedMessage(
   if (media.kind === "video_note") await tg.sendMessage(adminId, header); // aylana video izohsiz ketadi
   let error = await tg.sendMedia(adminId, media.kind, media.fileId, caption, chatButton);
   if (error) error = await tg.sendMedia(adminId, media.kind, media.fileId, caption);
+  if (error) error = await tg.reuploadMedia(adminId, media.kind, media.fileId, caption);
+  // Admin maxfiylik sozlamasida ovozli/aylana xabarlarni yopgan bo'lsa (VOICE_MESSAGES_FORBIDDEN) - oddiy fayl sifatida.
+  if (error && media.kind === "video_note") error = await tg.reuploadMedia(adminId, "video", media.fileId, caption);
+  if (error && media.kind === "voice") error = await tg.reuploadMedia(adminId, "audio", media.fileId, caption);
   if (error) {
     await sendText(`${header}\n\n[Media yubordi, lekin uni nusxalab bo'lmadi (himoyalangan bo'lishi mumkin) - chatni o'zingiz oching]`);
   }
