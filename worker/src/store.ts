@@ -7,6 +7,7 @@ import type {
   ServiceIntake,
   TrustedEntry,
   VipEntry,
+  WatchEntry,
 } from "./types";
 
 const ADMINS_KEY = "admins";
@@ -205,6 +206,29 @@ export async function removeVipEntry(env: Env, chatId: number, index: number): P
 
 export function findVip(list: VipEntry[], userId: number): VipEntry | null {
   return list.find((v) => v.id === userId) ?? null;
+}
+
+// Har bir adminning o'z ro'yxati - boshqa admin'ning ro'yxati unga ta'sir qilmaydi.
+function watchKey(adminId: number): string {
+  return `watch:${adminId}`;
+}
+
+export async function getWatchList(env: Env, adminId: number): Promise<WatchEntry[]> {
+  const raw = await env.BOT_KV.get(watchKey(adminId));
+  if (raw === null) return [];
+  return JSON.parse(raw) as WatchEntry[];
+}
+
+/** Shu ID allaqachon bo'lsa, faqat nomi yangilanadi. */
+export async function addWatchEntry(env: Env, adminId: number, entry: WatchEntry): Promise<void> {
+  const list = (await getWatchList(env, adminId)).filter((w) => w.id !== entry.id);
+  list.push(entry);
+  await env.BOT_KV.put(watchKey(adminId), JSON.stringify(list));
+}
+
+export async function removeWatchEntry(env: Env, adminId: number, id: number): Promise<void> {
+  const list = (await getWatchList(env, adminId)).filter((w) => w.id !== id);
+  await env.BOT_KV.put(watchKey(adminId), JSON.stringify(list));
 }
 
 /**

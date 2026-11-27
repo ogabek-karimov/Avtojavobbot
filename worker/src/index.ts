@@ -9,6 +9,7 @@ import {
   addFaqEntry,
   addTrustedEntry,
   addVipEntry,
+  addWatchEntry,
   appendHistory,
   clearHistory,
   findTrusted,
@@ -22,6 +23,7 @@ import {
   getStats,
   getTrustedList,
   getVipList,
+  getWatchList,
   isAdmin,
   isOwner,
   isTrustedBypassEnabled,
@@ -32,6 +34,7 @@ import {
   removeFaqEntry,
   removeTrustedEntry,
   removeVipEntry,
+  removeWatchEntry,
   setBusinessConnection,
   setChatSettings,
   setServiceIntake,
@@ -47,6 +50,7 @@ import type {
   TelegramUpdate,
   TelegramUser,
   VipEntry,
+  WatchEntry,
 } from "./types";
 import { classifyRisk } from "./safety";
 import { renderAppHtml } from "./webapp";
@@ -124,6 +128,48 @@ function intakeNotification(from: string, text: string): string {
 function senderLabel(user: TelegramUser): string {
   const name = user.username ? `${user.first_name} (@${user.username})` : user.first_name;
   return `${name} [ID: ${user.id}]`;
+}
+
+/**
+ * "Muhim chat" ro'yxatidagi odamning xabarini admin'ga bot orqali nusxalaydi. Nusxa admin bilan
+ * bot chatida qoladi - yozgan odam keyin o'z xabarini o'chirsa ham, admin uni ko'ra oladi.
+ */
+async function forwardWatchedMessage(
+  tg: ReturnType<typeof telegramApi>,
+  adminId: number,
+  entry: WatchEntry,
+  message: TelegramMessage,
+  from: TelegramUser,
+): Promise<void> {
+  const header = `📌 Muhim chat - ${entry.label}\n${senderLabel(from)}`;
+
+  if (message.text) {
+    await tg.sendMessage(adminId, `${header}\n\n${message.text.slice(0, 3800)}`);
+    return;
+  }
+
+  const media =
+    message.photo && message.photo.length > 0
+      ? { kind: "photo" as const, fileId: message.photo[message.photo.length - 1].file_id }
+      : message.video
+        ? { kind: "video" as const, fileId: message.video.file_id }
+        : message.video_note
+          ? { kind: "video_note" as const, fileId: message.video_note.file_id }
+          : message.voice
+            ? { kind: "voice" as const, fileId: message.voice.file_id }
+            : null;
+
+  if (!media) {
+    await tg.sendMessage(adminId, `${header}\n\n[Fayl, stiker yoki boshqa turdagi xabar yubordi - chatni o'zingiz oching]`);
+    return;
+  }
+
+  const caption = message.caption ? `${header}\n\n${message.caption.slice(0, 800)}` : header;
+  if (media.kind === "video_note") await tg.sendMessage(adminId, header); // aylana video izohsiz ketadi
+  const error = await tg.sendMedia(adminId, media.kind, media.fileId, caption);
+  if (error) {
+    await tg.sendMessage(adminId, `${header}\n\n[Media yubordi, lekin uni nusxalab bo'lmadi (bir martalik yoki himoyalangan bo'lishi mumkin) - chatni o'zingiz oching]`);
+  }
 }
 
 /** Lets FAQ/service-intake replies embed {ism} and always get the owner's current live name. */
@@ -289,9 +335,9 @@ async function authenticateApp(
 }
 
 /** Settings/FAQ/VIP are global (bot-owner-scoped) - any admin viewing the Mini App sees/edits the same shared config. */
-async function buildAppState(env: Env) {
+async function buildAppState(env: Env, userId: number) {
   const ownerId = await getOwner(env);
-  const [settings, admins, faq, vip, trusted, trustedEnabled, intake, stats] = await Promise.all([
+  const [settings, admins, faq, vip, trusted, trustedEnabled, intake, stats, watch] = await Promise.all([
     getChatSettings(env, ownerId),
     getAdmins(env),
     getFaq(env, ownerId),
@@ -300,8 +346,27 @@ async function buildAppState(env: Env) {
     isTrustedBypassEnabled(env, ownerId),
     getServiceIntake(env, ownerId),
     getStats(env),
+    getWatchList(env, userId),
   ]);
+
+  // Muhim chatlar: har kim faqat o'z ro'yxatini boshqaradi; yaratuvchi kichik adminlarnikini ham ko'radi (faqat ko'rish uchun).
+  let watchOthers: { adminId: number; name: string; entries: WatchEntry[] }[] = [];
+  if (userId === ownerId) {
+    const tg = telegramApi(env.TELEGRAM_BOT_TOKEN);
+    watchOthers = await Promise.all(
+      admins
+        .filter((id) => id !== ownerId)
+        .map(async (id) => ({
+          adminId: id,
+          name: (await tg.getChatFirstName(id)) ?? String(id),
+          entries: await getWatchList(env, id),
+        })),
+    );
+  }
+
   return {
+    watch,
+    watchOthers,
     settings,
     admins,
     ownerId,
@@ -318,7 +383,7 @@ async function buildAppState(env: Env) {
 async function handleApiState(request: Request, env: Env): Promise<Response> {
   const auth = await authenticateApp(request, env);
   if (auth instanceof Response) return auth;
-  const state = await buildAppState(env);
+  const state = await buildAppState(env, auth.userId);
   return new Response(JSON.stringify(state), {
     headers: { "Content-Type": "application/json" },
   });
@@ -441,11 +506,24 @@ async function handleApiAction(request: Request, env: Env): Promise<Response> {
       await env.BOT_KV.put(`report_token:${token}`, String(userId), { expirationTtl: 300 });
       return new Response(JSON.stringify({ token }), { headers: { "Content-Type": "application/json" } });
     }
+    case "add_watch": {
+      const targetId = parseInt(typeof body.id === "string" ? body.id : value, 10);
+      const label = typeof body.label === "string" ? body.label.trim() : "";
+      if (Number.isNaN(targetId) || !label) return new Response("ID va nom bo'sh bo'lmasin.", { status: 400 });
+      await addWatchEntry(env, userId, { id: targetId, label });
+      break;
+    }
+    case "remove_watch": {
+      const targetId = parseInt(typeof body.id === "string" ? body.id : value, 10);
+      if (Number.isNaN(targetId)) return new Response("Noto'g'ri ID.", { status: 400 });
+      await removeWatchEntry(env, userId, targetId);
+      break;
+    }
     default:
       return new Response("Noma'lum amal.", { status: 400 });
   }
 
-  const state = await buildAppState(env);
+  const state = await buildAppState(env, userId);
   return new Response(JSON.stringify(state), {
     headers: { "Content-Type": "application/json" },
   });
@@ -588,7 +666,7 @@ async function handleBusinessConnection(conn: TelegramBusinessConnection, env: E
  */
 async function handleBusinessMessage(message: TelegramMessage, env: Env): Promise<void> {
   const connectionId = message.business_connection_id;
-  if (!connectionId || !message.text || !message.from) return;
+  if (!connectionId || !message.from) return;
 
   const conn = await getBusinessConnection(env, connectionId);
   if (!conn || !conn.enabled) return;
@@ -596,6 +674,17 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
   if (!(await isAdmin(env, conn.ownerId))) return; // faqat hozirda admin bo'lganlar uchun
 
   const tg = telegramApi(env.TELEGRAM_BOT_TOKEN);
+
+  // Muhim chat: faqat shu chat egasi (conn.ownerId) o'zi qo'shgan ro'yxat ishlaydi. Bunday odamga bot
+  // umuman javob bermaydi (avtojavob o'chiq bo'lsa ham) - xabar faqat admin'ga nusxalanadi.
+  const sender = message.from;
+  const watched = (await getWatchList(env, conn.ownerId)).find((w) => w.id === sender.id);
+  if (watched) {
+    await forwardWatchedMessage(tg, conn.ownerId, watched, message, sender);
+    return;
+  }
+
+  if (!message.text) return;
   const customerChatId = message.chat.id;
   const text = message.text.trim();
 

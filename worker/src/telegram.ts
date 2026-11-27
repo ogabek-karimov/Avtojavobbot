@@ -38,6 +38,26 @@ export function telegramApi(token: string) {
       }
     },
 
+    /** Telegram'dagi mavjud fayl (file_id) orqali rasm/video/aylana video/ovozli xabar yuborish. Muvaffaqiyatsiz bo'lsa - xato matni. */
+    async sendMedia(
+      chatId: number,
+      kind: "photo" | "video" | "video_note" | "voice",
+      fileId: string,
+      caption?: string,
+    ): Promise<string | null> {
+      const method = { photo: "sendPhoto", video: "sendVideo", video_note: "sendVideoNote", voice: "sendVoice" }[kind];
+      const res = await fetch(`${base}/${method}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        // Aylana video izoh (caption) qabul qilmaydi.
+        body: JSON.stringify({ chat_id: chatId, [kind]: fileId, caption: kind === "video_note" ? undefined : caption }),
+      });
+      if (res.ok) return null;
+      const error = await res.text();
+      console.error(`${method} failed`, res.status, error);
+      return error;
+    },
+
     async editMessageText(
       chatId: number,
       messageId: number,

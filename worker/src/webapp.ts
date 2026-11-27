@@ -142,6 +142,22 @@ export function renderAppHtml(): string {
     </div>
 
     <div class="card">
+      <div class="label">📌 Muhim chatlar</div>
+      <div class="hint">Bu ro'yxatdagi odam sizga yozgan har bir xabar (matn, rasm, video, aylana video, ovozli xabar) bot orqali sizga nusxalanadi - u o'z xabarini o'chirsa ham, nusxasi sizda qoladi. Ularga bot hech qanday javob bermaydi. Ro'yxat faqat sizniki - boshqa adminlar uni ko'rmaydi.</div>
+      <div id="watchList" style="margin-top:8px"></div>
+      <div class="btn-row">
+        <input type="text" id="watchId" placeholder="Telegram ID" inputmode="numeric" />
+        <input type="text" id="watchLabel" placeholder="Nom (masalan: Rahbar)" />
+        <button id="addWatchBtn">Qo'shish</button>
+      </div>
+      <div id="watchOthersArea" hidden>
+        <div class="label" style="margin-top:14px">Kichik adminlarning muhim chatlari</div>
+        <div class="hint">Faqat ko'rish uchun - bu chatlarning xabarlari sizga emas, o'sha adminning o'ziga keladi</div>
+        <div id="watchOthersList" style="margin-top:8px"></div>
+      </div>
+    </div>
+
+    <div class="card">
       <div class="label">⚠️ VIP ro'yxat</div>
       <div class="hint">Bu ro'yxatdagi odam yozsa, AI umuman javob bermaydi - ularga "shaxsan javob beraman" xabari ketadi, sizga esa shoshilinch bildirishnoma keladi</div>
       <div id="vipList" style="margin-top:8px"></div>
@@ -362,6 +378,54 @@ export function renderAppHtml(): string {
     });
   }
 
+  function renderWatch(watch, watchOthers) {
+    const listEl = document.getElementById("watchList");
+    listEl.innerHTML = "";
+    if (watch.length === 0) {
+      listEl.innerHTML = '<div class="hint" style="padding:6px 0">Hali qo\\'shilmagan</div>';
+    }
+    watch.forEach((entry) => {
+      const row = document.createElement("div");
+      row.className = "admin-item";
+      const span = document.createElement("span");
+      span.textContent = entry.label + " - " + entry.id;
+      const btn = document.createElement("button");
+      btn.className = "danger";
+      btn.textContent = "O'chirish";
+      btn.style.padding = "6px 10px";
+      btn.style.fontSize = "12px";
+      btn.onclick = () => removeWatch(entry.id);
+      row.appendChild(span);
+      row.appendChild(btn);
+      listEl.appendChild(row);
+    });
+
+    const othersArea = document.getElementById("watchOthersArea");
+    const othersEl = document.getElementById("watchOthersList");
+    othersArea.hidden = watchOthers.length === 0;
+    othersEl.innerHTML = "";
+    watchOthers.forEach((admin) => {
+      const title = document.createElement("div");
+      title.className = "hint";
+      title.style.fontWeight = "600";
+      title.style.paddingTop = "6px";
+      title.textContent = admin.name + " (" + admin.adminId + "):";
+      othersEl.appendChild(title);
+      if (admin.entries.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "hint";
+        empty.textContent = "Hali qo'shmagan";
+        othersEl.appendChild(empty);
+      }
+      admin.entries.forEach((entry) => {
+        const row = document.createElement("div");
+        row.className = "admin-item";
+        row.textContent = entry.label + " - " + entry.id;
+        othersEl.appendChild(row);
+      });
+    });
+  }
+
   function escapeHtml(s) {
     const d = document.createElement("div");
     d.textContent = s;
@@ -378,6 +442,7 @@ export function renderAppHtml(): string {
     document.getElementById("adminManageArea").hidden = !isOwnerMe;
     document.getElementById("adminManageHint").hidden = isOwnerMe;
     renderFaq(state.faq);
+    renderWatch(state.watch, state.watchOthers);
     renderVip(state.vip);
     renderTrusted(state.trusted);
     document.getElementById("trustedToggle").checked = state.trustedEnabled;
@@ -538,6 +603,34 @@ export function renderAppHtml(): string {
       tg.showAlert("Xatolik: " + e.message);
     }
   });
+
+  document.getElementById("addWatchBtn").addEventListener("click", async () => {
+    const idInput = document.getElementById("watchId");
+    const labelInput = document.getElementById("watchLabel");
+    const id = idInput.value.trim();
+    const label = labelInput.value.trim();
+    if (!id || !label) {
+      tg.showAlert("ID va nomni kiriting.");
+      return;
+    }
+    try {
+      const state = await api("/api/action", { action: "add_watch", id, label });
+      render(state);
+      idInput.value = "";
+      labelInput.value = "";
+    } catch (e) {
+      tg.showAlert("Xatolik: " + e.message);
+    }
+  });
+
+  async function removeWatch(id) {
+    try {
+      const state = await api("/api/action", { action: "remove_watch", id: String(id) });
+      render(state);
+    } catch (e) {
+      tg.showAlert("Xatolik: " + e.message);
+    }
+  }
 
   document.getElementById("addTrustedBtn").addEventListener("click", async () => {
     const idInput = document.getElementById("trustedId");

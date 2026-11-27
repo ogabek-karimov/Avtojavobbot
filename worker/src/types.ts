@@ -42,6 +42,12 @@ export interface TrustedEntry {
   label: string;
 }
 
+/** "Muhim chat": shu odam admin'ga yozgan har bir xabar bot orqali o'sha admin'ga nusxalanadi (javob qaytarilmaydi). */
+export interface WatchEntry {
+  id: number;
+  label: string;
+}
+
 export interface ServiceIntake {
   enabled: boolean;
   description: string;
@@ -72,11 +78,20 @@ export interface TelegramChat {
   type: string;
 }
 
+export interface TelegramFile {
+  file_id: string;
+}
+
 export interface TelegramMessage {
   message_id: number;
   from?: TelegramUser;
   chat: TelegramChat;
   text?: string;
+  caption?: string;
+  photo?: TelegramFile[]; // bir xil rasmning turli o'lchamlari, oxirgisi eng kattasi
+  video?: TelegramFile;
+  video_note?: TelegramFile; // aylana video
+  voice?: TelegramFile;
   business_connection_id?: string;
 }
 
