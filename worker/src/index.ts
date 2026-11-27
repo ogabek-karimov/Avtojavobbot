@@ -142,9 +142,16 @@ async function forwardWatchedMessage(
   from: TelegramUser,
 ): Promise<void> {
   const header = `📌 Muhim chat - ${entry.label}\n${senderLabel(from)}`;
+  // Username bo'lsa t.me havolasi har doim ishlaydi; bo'lmasa ID havolasi (odamning maxfiylik sozlamasi taqiqlashi mumkin).
+  const chatButton: InlineKeyboard = {
+    inline_keyboard: [[{ text: "💬 Chatni ochish", url: from.username ? `https://t.me/${from.username}` : `tg://user?id=${from.id}` }]],
+  };
+  const sendText = async (text: string) => {
+    if (!(await tg.sendMessage(adminId, text, undefined, chatButton))) await tg.sendMessage(adminId, text);
+  };
 
   if (message.text) {
-    await tg.sendMessage(adminId, `${header}\n\n${message.text.slice(0, 3800)}`);
+    await sendText(`${header}\n\n${message.text.slice(0, 3800)}`);
     return;
   }
 
@@ -160,15 +167,16 @@ async function forwardWatchedMessage(
             : null;
 
   if (!media) {
-    await tg.sendMessage(adminId, `${header}\n\n[Fayl, stiker yoki boshqa turdagi xabar yubordi - chatni o'zingiz oching]`);
+    await sendText(`${header}\n\n[Fayl, stiker yoki boshqa turdagi xabar yubordi - chatni o'zingiz oching]`);
     return;
   }
 
   const caption = message.caption ? `${header}\n\n${message.caption.slice(0, 800)}` : header;
   if (media.kind === "video_note") await tg.sendMessage(adminId, header); // aylana video izohsiz ketadi
-  const error = await tg.sendMedia(adminId, media.kind, media.fileId, caption);
+  let error = await tg.sendMedia(adminId, media.kind, media.fileId, caption, chatButton);
+  if (error) error = await tg.sendMedia(adminId, media.kind, media.fileId, caption);
   if (error) {
-    await tg.sendMessage(adminId, `${header}\n\n[Media yubordi, lekin uni nusxalab bo'lmadi (bir martalik yoki himoyalangan bo'lishi mumkin) - chatni o'zingiz oching]`);
+    await sendText(`${header}\n\n[Media yubordi, lekin uni nusxalab bo'lmadi (himoyalangan bo'lishi mumkin) - chatni o'zingiz oching]`);
   }
 }
 

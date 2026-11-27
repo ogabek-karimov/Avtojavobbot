@@ -21,7 +21,7 @@ export function telegramApi(token: string) {
       replyToMessageId?: number,
       replyMarkup?: InlineKeyboard,
       businessConnectionId?: string,
-    ): Promise<void> {
+    ): Promise<boolean> {
       const res = await fetch(`${base}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -36,6 +36,7 @@ export function telegramApi(token: string) {
       if (!res.ok) {
         console.error("sendMessage failed", res.status, await res.text());
       }
+      return res.ok;
     },
 
     /** Telegram'dagi mavjud fayl (file_id) orqali rasm/video/aylana video/ovozli xabar yuborish. Muvaffaqiyatsiz bo'lsa - xato matni. */
@@ -44,13 +45,19 @@ export function telegramApi(token: string) {
       kind: "photo" | "video" | "video_note" | "voice",
       fileId: string,
       caption?: string,
+      replyMarkup?: InlineKeyboard,
     ): Promise<string | null> {
       const method = { photo: "sendPhoto", video: "sendVideo", video_note: "sendVideoNote", voice: "sendVoice" }[kind];
       const res = await fetch(`${base}/${method}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // Aylana video izoh (caption) qabul qilmaydi.
-        body: JSON.stringify({ chat_id: chatId, [kind]: fileId, caption: kind === "video_note" ? undefined : caption }),
+        body: JSON.stringify({
+          chat_id: chatId,
+          [kind]: fileId,
+          caption: kind === "video_note" ? undefined : caption,
+          reply_markup: replyMarkup,
+        }),
       });
       if (res.ok) return null;
       const error = await res.text();
