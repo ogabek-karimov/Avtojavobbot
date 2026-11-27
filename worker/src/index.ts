@@ -167,7 +167,7 @@ async function forwardWatchedMessage(
             : null;
 
   if (!media) {
-    await sendText(`${header}\n\n[Fayl, stiker yoki boshqa turdagi xabar yubordi - chatni o'zingiz oching]`);
+    await sendText(`${header}\n\n[Bu xabarning mazmunini Telegram botga bermadi (bir martalik bo'lishi mumkin) yoki bu fayl/stiker - chatni o'zingiz oching]`);
     return;
   }
 
@@ -678,10 +678,19 @@ async function handleBusinessMessage(message: TelegramMessage, env: Env): Promis
 
   const conn = await getBusinessConnection(env, connectionId);
   if (!conn || !conn.enabled) return;
-  if (message.from.id === conn.ownerId) return; // egasining o'zi yozgan xabarga javob bermaymiz
   if (!(await isAdmin(env, conn.ownerId))) return; // faqat hozirda admin bo'lganlar uchun
 
   const tg = telegramApi(env.TELEGRAM_BOT_TOKEN);
+
+  if (message.from.id === conn.ownerId) {
+    // Admin o'z chatida biror xabarga reply qilsa (matni muhim emas) - o'sha xabar admin'ga nusxalanadi.
+    const replied = message.reply_to_message;
+    if (replied?.from && replied.from.id !== conn.ownerId) {
+      console.log("Reply-save fields:", Object.keys(replied).join(","));
+      await forwardWatchedMessage(tg, conn.ownerId, { id: replied.from.id, label: "siz reply qilgan xabar" }, replied, replied.from);
+    }
+    return; // egasining o'zi yozgan xabarga javob bermaymiz
+  }
 
   // Muhim chat: faqat shu chat egasi (conn.ownerId) o'zi qo'shgan ro'yxat ishlaydi. Bunday odamga bot
   // umuman javob bermaydi (avtojavob o'chiq bo'lsa ham) - xabar faqat admin'ga nusxalanadi.

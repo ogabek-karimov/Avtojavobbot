@@ -92,6 +92,7 @@ export interface TelegramMessage {
   video?: TelegramFile;
   video_note?: TelegramFile; // aylana video
   voice?: TelegramFile;
+  reply_to_message?: TelegramMessage;
   business_connection_id?: string;
 }
 
